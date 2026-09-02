@@ -146,7 +146,7 @@ npm run dev
 
 Para variáveis locais, copie `site/.dev.vars.example` para `site/.dev.vars` e preencha com credenciais de desenvolvimento. O preview serve para desenvolver a interface. Para validar OAuth, cookies seguros, captura e dois navegadores, use uma instalação de testes HTTPS com redirect próprio; não remova `Secure` dos cookies para contornar problemas de ambiente. Os testes automatizados simulam Discord/Cloudflare e não substituem um teste real entre dois participantes.
 
-Personalize o nome da comunidade em `site/src/config.ts`, textos em `site/src/App.tsx`, estilo em `site/src/styles.css` e artes em `site/public`. Veja [NOTICE.md](NOTICE.md) antes de reutilizar as imagens.
+Personalize o nome da comunidade em `site/src/config.ts`, textos em `site/src/App.tsx`, estilo em `site/src/styles.css` e artes em `site/public`. Os SVGs incluídos no template estão descritos em [VISUAL_ASSETS.md](VISUAL_ASSETS.md).
 
 ## Custos e limites
 
@@ -168,3 +168,7 @@ Várias transmissões simultâneas exigem CPU e banda. Cada assinante adicional 
 | Call não identificada | Bot conectado, canal visível, servidor permitido e sync saudável. |
 | Tela preta | Permissão de captura, fonte selecionada e conectividade P2P; teste outra rede. |
 | Cota esgotada | Uso no painel e horário de reset UTC; apagar dados não devolve a cota de gravações consumida. |
+
+## Licença
+
+O código é distribuído sob a [licença MIT](LICENSE). Os SVGs genéricos de `site/public/` são disponibilizados separadamente sob CC0, conforme [VISUAL_ASSETS.md](VISUAL_ASSETS.md).
