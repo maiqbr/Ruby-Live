@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "types": ["node", "@cloudflare/workers-types"],
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "paths": { "@/*": ["./*"] }
+  },
+  "include": ["src", "worker", "components", "lib", "vite.config.ts"],
+  "exclude": ["node_modules", "dist"]
+}

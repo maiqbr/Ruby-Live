@@ -1,0 +1,7 @@
+{
+  "name": "ruby-live-bot",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": { "start": "node --env-file=.env src/index.cjs" },
+  "dependencies": { "discord.js": "14.27.0" }
+}

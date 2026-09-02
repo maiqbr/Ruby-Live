@@ -1,0 +1,16 @@
+{
+  "name": "ruby-live-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "engines": { "node": ">=22.13.0" },
+  "workspaces": ["site", "bot"],
+  "scripts": {
+    "dev": "npm run dev --workspace site",
+    "build": "npm run build --workspace site",
+    "typecheck": "npm run typecheck --workspace site",
+    "test": "npm run test --workspace site",
+    "start:bot": "npm start --workspace bot",
+    "deploy": "npm run deploy --workspace site",
+    "check:public": "node scripts/check-public.cjs"
+  }
+}
