@@ -22,7 +22,7 @@ type VoiceLocation = {
 };
 
 type SessionUser = { id: string; name: string; avatar: string | null; exp: number };
-type SocketAttachment = SessionUser & { roomKey: string | null; sessionId: string | null; sharing: boolean; camera?: boolean; windowStartedAt: number; messageCount: number };
+type SocketAttachment = SessionUser & { roomKey: string | null; sessionId: string | null; clientInstance?: string | null; sharing: boolean; camera?: boolean; windowStartedAt: number; messageCount: number };
 type ChannelState = { sessionId: string; roomKey: string; channelName: string; members: string[]; createdAt: number };
 
 const encoder = new TextEncoder();
@@ -34,6 +34,41 @@ const OAUTH_STATE_COOKIE = '__Host-ruby_oauth_state';
 const OAUTH_VERIFIER_COOKIE = '__Host-ruby_oauth_verifier';
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const SESSION_TTL_SECONDS = SESSION_TTL_MS / 1000;
+const MAX_HTTP_RATE_KEYS = 5_000;
+type RateWindow = { startedAt: number; count: number };
+const httpRateWindows = new Map<string, RateWindow>();
+const meResponseCache = new Map<string, { expiresAt: number; value: unknown }>();
+let healthResponseCache: { expiresAt: number; operational: boolean } | null = null;
+
+function requestIdentity(request: Request) {
+  const value = request.headers.get('cf-connecting-ip') || '';
+  return value.length > 0 && value.length <= 64 ? value : null;
+}
+
+function consumeRateLimit(key: string, limit: number, windowMs: number) {
+  const now = Date.now();
+  let current = httpRateWindows.get(key);
+  if (!current || now - current.startedAt >= windowMs) {
+    if (!current && httpRateWindows.size >= MAX_HTTP_RATE_KEYS) {
+      for (const [storedKey, stored] of httpRateWindows) {
+        if (now - stored.startedAt >= windowMs) httpRateWindows.delete(storedKey);
+      }
+      if (httpRateWindows.size >= MAX_HTTP_RATE_KEYS) return Math.ceil(windowMs / 1_000);
+    }
+    current = { startedAt: now, count: 0 };
+  }
+  current.count += 1;
+  httpRateWindows.set(key, current);
+  return current.count > limit ? Math.max(1, Math.ceil((windowMs - (now - current.startedAt)) / 1_000)) : 0;
+}
+
+function enforceRateLimit(request: Request, scope: string, ipLimit: number, windowMs: number, accountId?: string, accountLimit = ipLimit) {
+  const ip = requestIdentity(request);
+  let retryAfter = 0;
+  if (ip) retryAfter = Math.max(retryAfter, consumeRateLimit(`${scope}:ip:${ip}`, ipLimit, windowMs));
+  if (accountId) retryAfter = Math.max(retryAfter, consumeRateLimit(`${scope}:account:${accountId}`, accountLimit, windowMs));
+  return retryAfter ? json({ error: 'rate_limited' }, 429, { 'retry-after': String(retryAfter) }) : null;
+}
 
 function json(value: unknown, status = 200, headers: HeadersInit = {}) {
   const responseHeaders = new Headers(headers);
@@ -425,6 +460,7 @@ export class VoiceHub extends DurableObject<Env> {
       const userId = request.headers.get('x-user-id') || '';
       const name = (request.headers.get('x-user-name') || 'Tripulante').slice(0, 80);
       const avatar = request.headers.get('x-user-avatar') || null;
+      const clientInstance = request.headers.get('x-client-instance') || null;
       if (!SNOWFLAKE.test(userId)) return new Response('Unauthorized', { status: 401 });
       const voice = await this.getVoice(userId);
       const heartbeat = (await this.ctx.storage.get<number>('heartbeat')) || 0;
@@ -432,14 +468,19 @@ export class VoiceHub extends DurableObject<Env> {
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
       // Check after all awaits: admission and registration must not interleave.
-      if (this.activeUserIds().has(userId)) {
-        server.accept();
-        server.close(4009, 'Já existe uma sessão ativa para esta conta');
-        return new Response(null, { status: 101, webSocket: client });
+      const existing = this.ctx.getWebSockets().find(socket => socket.readyState === 1 && (socket.deserializeAttachment() as SocketAttachment | null)?.id === userId);
+      if (existing) {
+        const previous = existing.deserializeAttachment() as SocketAttachment | null;
+        if (clientInstance && (!previous?.clientInstance || previous.clientInstance === clientInstance)) existing.close(4010, 'Sessão reconectada');
+        else {
+          server.accept();
+          server.close(4009, 'Já existe uma sessão ativa para esta conta');
+          return new Response(null, { status: 101, webSocket: client });
+        }
       }
       const requestedExpiry = Number(request.headers.get('x-session-exp'));
       const exp = Number.isFinite(requestedExpiry) ? Math.min(requestedExpiry, Date.now() + SESSION_TTL_MS) : Date.now() + SESSION_TTL_MS;
-      const attachment: SocketAttachment = { id: userId, name, avatar, exp, roomKey: healthy ? voice?.roomKey || null : null, sessionId: healthy ? voice?.sessionId || null : null, sharing: false, windowStartedAt: Date.now(), messageCount: 0 };
+      const attachment: SocketAttachment = { id: userId, name, avatar, exp, roomKey: healthy ? voice?.roomKey || null : null, sessionId: healthy ? voice?.sessionId || null : null, clientInstance, sharing: false, windowStartedAt: Date.now(), messageCount: 0 };
       server.serializeAttachment(attachment);
       this.ctx.acceptWebSocket(server);
       if (!voice || !healthy) this.send(server, { type: 'waiting', syncHealthy: healthy });
@@ -591,6 +632,9 @@ export default {
     } else if (url.pathname === '/api/auth/discord' && request.method !== 'GET') {
       response = methodNotAllowed('GET');
     } else if (url.pathname === '/api/auth/discord') {
+      const limited = enforceRateLimit(request, 'oauth-start', 60, 5 * 60_000);
+      if (limited) response = limited;
+      else {
       const state = await randomToken();
       const verifier = await randomToken(48);
       const challenge = base64url(new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(verifier))));
@@ -601,9 +645,13 @@ export default {
       headers.append('set-cookie', cookie(OAUTH_STATE_COOKIE, state, 600));
       headers.append('set-cookie', cookie(OAUTH_VERIFIER_COOKIE, verifier, 600));
       response = new Response(null, { status: 302, headers });
+      }
     } else if (url.pathname === '/api/auth/callback' && request.method !== 'GET') {
       response = methodNotAllowed('GET');
     } else if (url.pathname === '/api/auth/callback') {
+      const limited = enforceRateLimit(request, 'oauth-callback', 60, 5 * 60_000);
+      if (limited) response = limited;
+      else {
       const cookies = readCookies(request);
       const state = url.searchParams.get('state');
       const code = url.searchParams.get('code');
@@ -631,6 +679,7 @@ export default {
           }
         }
       }
+      }
     } else if (url.pathname === '/api/session/refresh' && request.method !== 'POST') {
       response = methodNotAllowed('POST');
     } else if (url.pathname === '/api/session/refresh') {
@@ -639,39 +688,61 @@ export default {
         const current = await readSession(request, env.SESSION_SECRET || '');
         if (!current) response = json({ authenticated: false }, 401);
         else {
+          const limited = enforceRateLimit(request, 'session-refresh', 120, 60 * 60_000, current.id, 20);
+          if (limited) response = limited;
+          else {
           const session = await makeSession({ id: current.id, name: current.name, avatar: current.avatar }, env.SESSION_SECRET);
           const headers = new Headers();
           headers.append('set-cookie', cookie(SESSION_COOKIE, session, SESSION_TTL_SECONDS));
           response = json({ authenticated: true }, 200, headers);
+          }
         }
       }
     } else if (url.pathname === '/api/logout' && request.method === 'POST') {
       if (!isSameOriginRequest(request, origin)) response = json({ error: 'invalid_origin' }, 403);
       else response = new Response(null, { status: 303, headers: { location: '/', 'set-cookie': cookie(SESSION_COOKIE, '', 0) } });
+    } else if (url.pathname === '/api/me' && request.method !== 'GET') {
+      response = methodNotAllowed('GET');
     } else if (url.pathname === '/api/me') {
       const session = await readSession(request, env.SESSION_SECRET || '');
       if (!session) response = json({ authenticated: false });
       else {
-        const state = await hub(env).fetch(new Request('https://internal/state', { headers: { 'x-user-id': session.id } }));
-        const voice = await state.json<{ voice: VoiceLocation | null; syncHealthy: boolean }>();
-        response = json({ authenticated: true, user: { id: session.id, name: session.name, avatar: session.avatar }, voice: voice.voice, syncHealthy: voice.syncHealthy });
+        const limited = enforceRateLimit(request, 'me', 600, 60_000, session.id, 120);
+        if (limited) response = limited;
+        else {
+          const cached = meResponseCache.get(session.id);
+          let voice: { voice: VoiceLocation | null; syncHealthy: boolean };
+          if (cached && cached.expiresAt > Date.now()) voice = cached.value as typeof voice;
+          else {
+            const state = await hub(env).fetch(new Request('https://internal/state', { headers: { 'x-user-id': session.id } }));
+            voice = await state.json<typeof voice>();
+            if (meResponseCache.size >= 1_000) meResponseCache.clear();
+            meResponseCache.set(session.id, { expiresAt: Date.now() + 2_000, value: voice });
+          }
+          response = json({ authenticated: true, user: { id: session.id, name: session.name, avatar: session.avatar }, voice: voice.voice, syncHealthy: voice.syncHealthy });
+        }
       }
     } else if (url.pathname === '/api/health' && request.method !== 'GET') {
       response = methodNotAllowed('GET');
     } else if (url.pathname === '/api/health') {
-      const configured = env.MAINTENANCE_MODE !== 'true'
-        && encoder.encode(env.LIVE_SYNC_SECRET || '').byteLength >= 32
-        && encoder.encode(env.SESSION_SECRET || '').byteLength >= 32
-        && Boolean(env.DISCORD_CLIENT_ID && env.DISCORD_CLIENT_SECRET);
-      if (!configured) response = json({ operational: false });
+      const limited = enforceRateLimit(request, 'health', 600, 60_000);
+      if (limited) response = limited;
+      else if (healthResponseCache && healthResponseCache.expiresAt > Date.now()) response = json({ operational: healthResponseCache.operational });
       else {
-        try {
-          const health = await hub(env).fetch(new Request('https://internal/health'));
-          const status = await health.json<{ operational?: boolean }>();
-          response = json({ operational: health.ok && status.operational === true });
-        } catch {
-          response = json({ operational: false });
+        const configured = env.MAINTENANCE_MODE !== 'true'
+          && encoder.encode(env.LIVE_SYNC_SECRET || '').byteLength >= 32
+          && encoder.encode(env.SESSION_SECRET || '').byteLength >= 32
+          && Boolean(env.DISCORD_CLIENT_ID && env.DISCORD_CLIENT_SECRET);
+        let operational = false;
+        if (configured) {
+          try {
+            const health = await hub(env).fetch(new Request('https://internal/health'));
+            const status = await health.json<{ operational?: boolean }>();
+            operational = health.ok && status.operational === true;
+          } catch { /* remains unavailable */ }
         }
+        healthResponseCache = { expiresAt: Date.now() + 15_000, operational };
+        response = json({ operational });
       }
     } else if (url.pathname === '/api/ws' && request.method !== 'GET') {
       response = methodNotAllowed('GET');
@@ -681,12 +752,18 @@ export default {
       else if (request.headers.get('origin') !== origin) response = new Response('Forbidden', { status: 403 });
       else if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') response = new Response('Upgrade Required', { status: 426 });
       else {
+        const limited = enforceRateLimit(request, 'websocket-upgrade', 240, 60_000, session.id, 40);
+        if (limited) response = limited;
+        else {
         const headers = new Headers(request.headers);
+        const clientInstance = url.searchParams.get('client');
         headers.set('x-user-id', session.id);
         headers.set('x-user-name', session.name);
         headers.set('x-session-exp', String(session.exp));
+        if (clientInstance && /^[0-9a-f-]{36}$/i.test(clientInstance)) headers.set('x-client-instance', clientInstance);
         if (session.avatar) headers.set('x-user-avatar', session.avatar);
         response = await hub(env).fetch(new Request('https://internal/ws', { headers }));
+        }
       }
     } else if (url.pathname.startsWith('/api/')) {
       response = json({ error: 'not_found' }, 404);

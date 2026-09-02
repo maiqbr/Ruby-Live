@@ -522,7 +522,13 @@ export default function App() {
     let reconnectTimer: number | undefined;
     let keepAliveTimer: number | undefined;
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const socket = new WebSocket(`${protocol}//${location.host}/api/ws`);
+    const storageKey = 'ruby_live_tab_id';
+    let tabId = sessionStorage.getItem(storageKey);
+    if (!tabId || !/^[0-9a-f-]{36}$/i.test(tabId)) {
+      tabId = crypto.randomUUID();
+      sessionStorage.setItem(storageKey, tabId);
+    }
+    const socket = new WebSocket(`${protocol}//${location.host}/api/ws?client=${encodeURIComponent(tabId)}`);
     socketRef.current = socket;
     socket.onopen = () => {
       reconnectAttemptsRef.current = 0;
