@@ -226,6 +226,8 @@ async function randomToken(size = 32) {
 }
 
 export class VoiceHub extends DurableObject<Env> {
+  private inactiveSince = new Map<string, number>();
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
@@ -320,6 +322,7 @@ export class VoiceHub extends DurableObject<Env> {
   }
 
   private async removeUser(userId: string) {
+    this.inactiveSince.delete(userId);
     const current = await this.getVoice(userId);
     if (!current) return;
     const key = this.channelKey(current.guildId, current.channelId);
@@ -426,9 +429,25 @@ export class VoiceHub extends DurableObject<Env> {
       for (const [key, location] of current) {
         if (location.guildId !== guildId) continue;
         const userId = key.slice(5);
-        if (!desired.has(userId)) await this.removeUser(userId);
+        if (desired.has(userId)) {
+          this.inactiveSince.delete(userId);
+          continue;
+        }
+        if (activeUsers.has(userId)) {
+          await this.removeUser(userId);
+          continue;
+        }
+        const missingSince = this.inactiveSince.get(userId);
+        if (!missingSince) {
+          this.inactiveSince.set(userId, Date.now());
+          continue;
+        }
+        if (Date.now() - missingSince >= 15_000) await this.removeUser(userId);
       }
-      for (const [userId, channel] of desired) await this.placeUser(guildId, channel.channelId, userId, channel.channelName);
+      for (const [userId, channel] of desired) {
+        this.inactiveSince.delete(userId);
+        await this.placeUser(guildId, channel.channelId, userId, channel.channelName);
+      }
       return;
     }
     throw new Error('invalid_type');

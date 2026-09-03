@@ -521,6 +521,7 @@ export default function App() {
     let cancelled = false;
     let reconnectTimer: number | undefined;
     let keepAliveTimer: number | undefined;
+    let waitingTimer: number | undefined;
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const storageKey = 'ruby_live_tab_id';
     let tabId = sessionStorage.getItem(storageKey);
@@ -542,10 +543,17 @@ export default function App() {
       if (event.data === 'pong') return;
       const message = JSON.parse(String(event.data)) as SocketMessage;
       if (message.type === 'waiting') {
-        stopRoomMedia();
-        roomRef.current = null;
-        setMe(current => current ? { ...current, voice: null, syncHealthy: message.syncHealthy } : current);
+        window.clearTimeout(waitingTimer);
+        const applyWaiting = () => {
+          if (cancelled || socketRef.current !== socket) return;
+          stopRoomMedia();
+          roomRef.current = null;
+          setMe(current => current ? { ...current, voice: null, syncHealthy: message.syncHealthy } : current);
+        };
+        if (roomRef.current) waitingTimer = window.setTimeout(applyWaiting, 8_000);
+        else applyWaiting();
       } else if (message.type === 'session') {
+        window.clearTimeout(waitingTimer);
         const room = `${message.roomKey}:${message.sessionId}`;
         if (roomRef.current && roomRef.current !== room) stopRoomMedia();
         roomRef.current = room;
@@ -560,6 +568,7 @@ export default function App() {
         if (localStreamRef.current) send({ type: 'share_state', sharing: true });
         if (cameraStreamRef.current) send({ type: 'camera_state', camera: true });
       } else if (message.type === 'voice_state') {
+        window.clearTimeout(waitingTimer);
         setMe(current => current ? { ...current, voice: message.voice, syncHealthy: message.syncHealthy } : current);
         if (!message.voice || (roomRef.current && roomRef.current !== `${message.voice.roomKey}:${message.voice.sessionId}`)) {
           stopRoomMedia();
@@ -639,6 +648,7 @@ export default function App() {
     return () => {
       cancelled = true;
       window.clearTimeout(reconnectTimer);
+      window.clearTimeout(waitingTimer);
       window.clearInterval(keepAliveTimer);
       if (socketRef.current === socket) { socketRef.current = null; resetPeerConnections(); }
       socket.close();
