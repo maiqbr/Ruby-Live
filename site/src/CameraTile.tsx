@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Maximize, Maximize2, Minimize2, Video } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { openMediaFullscreen } from './fullscreen';
 
 type Props = {
   user: { id: string; name: string; avatar: string | null };
@@ -33,6 +34,9 @@ export function CameraTile({ user, stream, stats, actualLabel, watching, local, 
     return () => { active = false; video.pause(); video.srcObject = null; };
   }, [stream]);
   const avatar = user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=128` : null;
+  const enterFullscreen = async () => {
+    if (!await openMediaFullscreen(tileRef.current, videoRef.current) && !focused) onFocus();
+  };
   return (
     <article ref={tileRef} className={`camera-tile${local ? ' camera-local' : ''}${focused ? ' camera-focused' : ''}`}>
       <button type="button" className="camera-picture" onClick={watching ? onFocus : onToggle} aria-label={`${watching ? 'Destacar' : 'Ver'} câmera de ${user.name}`}>
@@ -45,7 +49,7 @@ export function CameraTile({ user, stream, stats, actualLabel, watching, local, 
       <div className="camera-caption"><span className="camera-person"><strong>{local ? 'Você' : user.name}</strong><small>{local ? `${actualLabel || 'Verificando captura…'} · sem microfone` : watching ? 'Recebendo câmera' : 'Disponível · não recebendo'}</small></span>
         <Button size="xs" variant={watching ? 'secondary' : 'default'} onClick={onToggle}>{local ? 'Desligar' : watching ? 'Parar' : 'Ver'}</Button>
         {watching && <Button size="icon-xs" variant="ghost" onClick={onFocus} aria-label={focused ? 'Reduzir câmera' : 'Destacar câmera'} title={focused ? 'Reduzir câmera' : 'Destacar câmera'}>{focused ? <Minimize2 /> : <Maximize2 />}</Button>}
-        {stream && watching && <Button size="icon-xs" variant="ghost" onClick={() => void tileRef.current?.requestFullscreen().catch(() => undefined)} aria-label="Câmera em tela cheia" title="Tela cheia"><Maximize /></Button>}
+        {stream && watching && <Button size="icon-xs" variant="ghost" onClick={() => void enterFullscreen()} aria-label="Câmera em tela cheia" title="Tela cheia"><Maximize /></Button>}
       </div>
     </article>
   );

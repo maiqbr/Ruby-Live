@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { cameraConstraints, exactCameraVideoConstraints, prepareScreenTrack, syncOutgoingTracks, type MediaKind, type CameraQuality, type CameraFps } from './media';
 import { CameraTile } from './CameraTile';
+import { openMediaFullscreen } from './fullscreen';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverTrigger, PopoverContent, PopoverTitle, PopoverDescription } from '@/components/ui/popover';
@@ -113,6 +114,10 @@ function VideoTile({ peer, stream, watching, focused, stats, onToggle, onFocus }
     });
   };
 
+  const enterFullscreen = async () => {
+    if (!await openMediaFullscreen(tileRef.current, videoRef.current)) onFocus();
+  };
+
   return (
     <article ref={tileRef} className={focused ? 'video-tile focused' : 'video-tile'}>
       {stream ? (
@@ -135,7 +140,7 @@ function VideoTile({ peer, stream, watching, focused, stats, onToggle, onFocus }
           {watching ? 'Parar de assistir' : 'Assistir'}
         </button>
         {watching && <button className="view-toggle" type="button" onClick={onFocus} title={focused ? 'Voltar para a grade' : 'Destacar transmissão'}>{focused ? <Minimize2 size={15} /> : <Maximize2 size={15} />}</button>}
-        {stream && <button className="view-toggle" type="button" onClick={() => void tileRef.current?.requestFullscreen()} title="Tela cheia" aria-label="Tela cheia"><Maximize size={15} /></button>}
+        {stream && <button className="view-toggle" type="button" onClick={() => void enterFullscreen()} title="Tela cheia" aria-label="Tela cheia"><Maximize size={15} /></button>}
         {stream && (
           <button className="audio-toggle" type="button" onClick={toggleAudio} title={muted ? 'Ativar áudio' : 'Silenciar'}>
             {muted ? <VolumeX size={15} /> : <Volume2 size={15} />}
@@ -161,6 +166,9 @@ function LocalVideoTile({ stream, focused, stats, onFocus, onStop }: { stream: M
     // Detach only the preview; never stop the tracks being sent to viewers.
     return () => { video.pause(); video.srcObject = null; };
   }, [stream, previewVisible]);
+  const enterFullscreen = async () => {
+    if (!await openMediaFullscreen(tileRef.current, videoRef.current) && !focused) onFocus();
+  };
   return (
     <article ref={tileRef} className={`video-tile local-tile${focused ? ' focused' : ''}`}>
       {previewVisible ? <video ref={videoRef} autoPlay playsInline muted onLoadedMetadata={() => setVideoReady(true)} onLoadedData={() => setVideoReady(true)} onPlaying={() => setVideoReady(true)} onCanPlay={() => setVideoReady(true)} onTimeUpdate={() => setVideoReady(true)} onWaiting={() => setVideoReady(false)} onStalled={() => setVideoReady(false)} /> : <div className="video-empty"><MonitorUp size={32} /><p>Prévia oculta · você continua transmitindo</p></div>}
@@ -170,7 +178,7 @@ function LocalVideoTile({ stream, focused, stats, onFocus, onStop }: { stream: M
         <span className="live-dot active" /><strong>Sua transmissão</strong><span>ao vivo</span>
         <button className="watch-toggle" type="button" onClick={() => setPreviewVisible(current => !current)} title="Altera somente a sua prévia, sem interromper a transmissão">{previewVisible ? 'Ocultar prévia' : 'Mostrar prévia'}</button>
         <button className="view-toggle" type="button" onClick={onFocus} title={focused ? 'Voltar para a grade' : 'Destacar transmissão'} aria-label={focused ? 'Voltar para a grade' : 'Destacar sua transmissão'}>{focused ? <Minimize2 size={15} /> : <Maximize2 size={15} />}</button>
-        {previewVisible && <button className="view-toggle" type="button" onClick={() => void tileRef.current?.requestFullscreen().catch(() => undefined)} title="Tela cheia" aria-label="Sua transmissão em tela cheia"><Maximize size={15} /></button>}
+        {previewVisible && <button className="view-toggle" type="button" onClick={() => void enterFullscreen()} title="Tela cheia" aria-label="Sua transmissão em tela cheia"><Maximize size={15} /></button>}
         <button className="watch-toggle stop-local-share" type="button" onClick={onStop} title="Encerrar a transmissão para todos"><CircleStop size={14} /> Parar transmissão</button>
       </div>
     </article>
