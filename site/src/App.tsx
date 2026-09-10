@@ -28,13 +28,14 @@ import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverTrigger, PopoverContent, PopoverTitle, PopoverDescription } from '@/components/ui/popover';
 
 type User = { id: string; name: string; avatar: string | null };
-type VoiceRoom = { roomKey: string; sessionId: string; channelName?: string };
-type Me = { authenticated: boolean; user?: User; voice?: VoiceRoom | null; syncHealthy?: boolean };
-type Peer = User & { sharing?: boolean; camera?: boolean };
+type VoiceRoom = { roomKey: string; sessionId: string; channelName?: string; canBroadcast: boolean; broadcaster: boolean };
+type WaitingState = { reason: 'channel_blocked'; channelName: string };
+type Me = { authenticated: boolean; user?: User; voice?: VoiceRoom | null; waiting?: WaitingState | null; syncHealthy?: boolean };
+type Peer = User & { sharing?: boolean; camera?: boolean; broadcaster?: boolean };
 type SocketMessage =
-  | { type: 'waiting'; syncHealthy: boolean }
-  | { type: 'session'; selfId: string; roomKey: string; sessionId: string; channelName?: string; peers: Peer[] }
-  | { type: 'voice_state'; voice: VoiceRoom | null; syncHealthy: boolean }
+  | { type: 'waiting'; syncHealthy: boolean; waiting?: WaitingState | null }
+  | { type: 'session'; selfId: string; roomKey: string; sessionId: string; channelName?: string; canBroadcast: boolean; broadcaster: boolean; peers: Peer[] }
+  | { type: 'voice_state'; voice: VoiceRoom | null; waiting?: WaitingState | null; syncHealthy: boolean }
   | { type: 'peer_joined'; peer: Peer }
   | { type: 'peer_left'; userId: string }
   | { type: 'peers'; peers: Peer[] }
@@ -87,6 +88,10 @@ function StatsBadge({ stats }: { stats?: PlaybackStats }) {
   return <span className={stats.limited ? 'stream-stats limited' : 'stream-stats'} title={stats.limited ? 'A conexão ou o computador pode estar reduzindo a reprodução.' : 'Qualidade recebida neste navegador'}>{parts.join(' · ') || 'Analisando qualidade…'}</span>;
 }
 
+function BroadcasterBadge({ visible }: { visible?: boolean }) {
+  return visible ? <img className="broadcaster-badge" src="/broadcaster.svg" alt="" title="Pode transmitir" /> : null;
+}
+
 function VideoTile({ peer, stream, watching, focused, stats, onToggle, onFocus }: { peer: Peer; stream?: MediaStream; watching: boolean; focused: boolean; stats?: PlaybackStats; onToggle: () => void; onFocus: () => void }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const tileRef = useRef<HTMLElement>(null);
@@ -134,7 +139,7 @@ function VideoTile({ peer, stream, watching, focused, stats, onToggle, onFocus }
       {stream && <StatsBadge stats={stats} />}
       <div className="tile-caption">
         <span className={peer.sharing ? 'live-dot active' : 'live-dot'} />
-        <strong>{peer.name}</strong>
+        <strong>{peer.name}</strong><BroadcasterBadge visible={peer.broadcaster} />
         {peer.sharing && <span>ao vivo</span>}
         <button className={watching ? 'watch-toggle active' : 'watch-toggle'} type="button" onClick={onToggle}>
           {watching ? 'Parar de assistir' : 'Assistir'}
@@ -556,7 +561,7 @@ export default function App() {
           if (cancelled || socketRef.current !== socket) return;
           stopRoomMedia();
           roomRef.current = null;
-          setMe(current => current ? { ...current, voice: null, syncHealthy: message.syncHealthy } : current);
+          setMe(current => current ? { ...current, voice: null, waiting: message.waiting || null, syncHealthy: message.syncHealthy } : current);
         };
         if (roomRef.current) waitingTimer = window.setTimeout(applyWaiting, 8_000);
         else applyWaiting();
@@ -566,7 +571,7 @@ export default function App() {
         if (roomRef.current && roomRef.current !== room) stopRoomMedia();
         roomRef.current = room;
         selfIdRef.current = message.selfId;
-        setMe(current => current ? { ...current, voice: { roomKey: message.roomKey, sessionId: message.sessionId, channelName: message.channelName } } : current);
+        setMe(current => current ? { ...current, voice: { roomKey: message.roomKey, sessionId: message.sessionId, channelName: message.channelName, canBroadcast: message.canBroadcast, broadcaster: message.broadcaster }, waiting: null } : current);
         setPeers(Object.fromEntries(message.peers.map(peer => [peer.id, peer])));
         for (const peer of message.peers) {
           ensurePeer(peer.id);
@@ -577,7 +582,11 @@ export default function App() {
         if (cameraStreamRef.current) send({ type: 'camera_state', camera: true });
       } else if (message.type === 'voice_state') {
         window.clearTimeout(waitingTimer);
-        setMe(current => current ? { ...current, voice: message.voice, syncHealthy: message.syncHealthy } : current);
+        if (message.voice?.canBroadcast === false && (localStreamRef.current || cameraStreamRef.current)) {
+          stopRoomMedia();
+          setNotice('Sua permissão para transmitir nesta call foi removida.');
+        }
+        setMe(current => current ? { ...current, voice: message.voice, waiting: message.waiting || null, syncHealthy: message.syncHealthy } : current);
         if (!message.voice || (roomRef.current && roomRef.current !== `${message.voice.roomKey}:${message.voice.sessionId}`)) {
           stopRoomMedia();
           roomRef.current = null;
@@ -664,6 +673,7 @@ export default function App() {
   }, [me?.authenticated, socketEpoch, closePeer, ensurePeer, handleSignal, updateSubscriber, stopRoomMedia, resetPeerConnections, send]);
 
   const startCamera = async (deviceId = cameraDeviceId) => {
+    if (me?.voice?.canBroadcast === false) { setNotice('Você precisa de um dos cargos autorizados para ligar a câmera nesta call.'); return; }
     const socket = socketRef.current;
     const room = roomRef.current;
     if (!room || socket?.readyState !== WebSocket.OPEN) { setNotice('Aguarde a conexão com a call antes de ligar a câmera.'); return; }
@@ -761,6 +771,7 @@ export default function App() {
   };
 
   const startSharing = async () => {
+    if (me?.voice?.canBroadcast === false) { setNotice('Você precisa de um dos cargos autorizados para transmitir nesta call.'); return; }
     const room = roomRef.current;
     const socket = socketRef.current;
     if (!room || socket?.readyState !== WebSocket.OPEN || localStreamRef.current) return;
@@ -874,10 +885,9 @@ export default function App() {
         <section className="waiting-card">
           <div className="radar"><span /><img src="/rocket.svg" alt="" /></div>
           <Badge variant="outline" className="waiting-identity">{me.user && <img src={waitingAvatarUrl(me.user)} alt="" />} conectado como {me.user?.name}</Badge>
-          <h1>Buscando sua call…</h1>
-          <p>Já está em uma call? Aguarde alguns segundos enquanto identificamos sua sala.</p>
-          <p>Se ainda não estiver, entre em uma call na comunidade <strong>{COMMUNITY_NAME}</strong> para transmitir sua tela ou câmera e assistir às transmissões das pessoas dessa call.</p>
-          <div className="status-pill"><span className={me.syncHealthy === false ? 'status-dot warning' : 'status-dot'} /> {me.syncHealthy === false ? 'Bot temporariamente sem comunicação' : 'Procurando sua call…'}</div>
+          <h1>{me.waiting?.reason === 'channel_blocked' ? 'Live indisponível nesta call' : 'Buscando sua call…'}</h1>
+          {me.waiting?.reason === 'channel_blocked' ? <><p>O canal <strong>{me.waiting.channelName}</strong> está na lista de canais ignorados e não cria uma sala de transmissão.</p><p>Entre em outra call liberada da comunidade para assistir ou transmitir.</p></> : <><p>Já está em uma call? Aguarde alguns segundos enquanto identificamos sua sala.</p><p>Se ainda não estiver, entre em uma call na comunidade <strong>{COMMUNITY_NAME}</strong> para transmitir sua tela ou câmera e assistir às transmissões das pessoas dessa call.</p></>}
+          <div className="status-pill"><span className={me.syncHealthy === false || me.waiting ? 'status-dot warning' : 'status-dot'} /> {me.syncHealthy === false ? 'Bot temporariamente sem comunicação' : me.waiting ? 'Canal sem sala de live' : 'Procurando sua call…'}</div>
         </section>
       </main>
     );
@@ -896,7 +906,7 @@ export default function App() {
   const localScreenSettings = localStream?.getVideoTracks()[0]?.getSettings();
   const localScreenStats: PlaybackStats | undefined = localScreenSettings ? { width: localScreenSettings.width, height: localScreenSettings.height, fps: localScreenSettings.frameRate, limited: false } : undefined;
   const cameraEntries = [
-    ...(cameraStream && me.user ? [{ user: me.user, key: 'self', stream: cameraStream, watching: true, local: true }] : []),
+    ...(cameraStream && me.user ? [{ user: { ...me.user, broadcaster: me.voice.broadcaster }, key: 'self', stream: cameraStream, watching: true, local: true }] : []),
     ...cameraPeers.map(peer => ({ user: peer, key: peer.id, stream: watchingCameras[peer.id] ? cameraStreams[peer.id] : undefined, watching: Boolean(watchingCameras[peer.id]), local: false })),
   ];
   const cameraTile = (entry: typeof cameraEntries[number]) => <CameraTile key={entry.key} user={entry.user} stream={entry.stream} stats={entry.local ? undefined : cameraStats[entry.key]} actualLabel={entry.local ? cameraActual : undefined} watching={entry.watching} local={entry.local} focused={focusedCameraId === entry.key} onToggle={entry.local ? stopCamera : () => toggleWatchingCamera(entry.key)} onFocus={() => setFocusedCameraId(current => current === entry.key ? null : entry.key)} />;
@@ -915,13 +925,13 @@ export default function App() {
           <div className="participant-list">
             <div className="participant-row">
               <span className="avatar">{me.user && avatarUrl(me.user) ? <img src={avatarUrl(me.user)!} alt="" /> : me.user?.name.slice(0, 1)}</span>
-              <span><strong>{me.user?.name}</strong><small>{[sharing && 'Tela ao vivo', cameraStream && 'Câmera ligada'].filter(Boolean).join(' + ') || 'Na sala'}</small></span>
+              <span><strong>{me.user?.name}<BroadcasterBadge visible={me.voice.broadcaster} /></strong><small>{[sharing && 'Tela ao vivo', cameraStream && 'Câmera ligada'].filter(Boolean).join(' + ') || 'Na sala'}</small></span>
               <span className={sharing || cameraStream ? 'participant-live active' : 'participant-live'} />
             </div>
             {peerList.map(peer => (
               <button type="button" className={`participant-row${peer.sharing || peer.camera ? ' clickable' : ''}${focusedPeerId === peer.id || focusedCameraId === peer.id ? ' selected' : ''}`} key={peer.id} disabled={!peer.sharing && !peer.camera} onClick={() => { if (peer.sharing) focusFromSidebar(peer.id); else { if (!watchingCameras[peer.id]) toggleWatchingCamera(peer.id); setFocusedCameraId(peer.id); } }} title={`Ver mídia de ${peer.name}`}>
                 <span className="avatar">{avatarUrl(peer) ? <img src={avatarUrl(peer)!} alt="" /> : peer.name.slice(0, 1).toUpperCase()}</span>
-                <span><strong>{peer.name}</strong><small>{[peer.sharing && 'Tela ao vivo', peer.camera && 'Webcam'].filter(Boolean).join(' + ') || 'Na sala'}</small></span>
+                <span><strong>{peer.name}<BroadcasterBadge visible={peer.broadcaster} /></strong><small>{[peer.sharing && 'Tela ao vivo', peer.camera && 'Webcam'].filter(Boolean).join(' + ') || 'Na sala'}</small></span>
                 <span className={peer.sharing || peer.camera ? 'participant-live active' : 'participant-live'} />
               </button>
             ))}
@@ -954,14 +964,14 @@ export default function App() {
       <footer className="media-dock" aria-label="Controles de câmera e tela">
         <div className="identity">
           <span className="avatar">{me.user && avatarUrl(me.user) ? <img src={avatarUrl(me.user)!} alt="" /> : me.user?.name.slice(0, 1)}</span>
-          <span><strong>{me.user?.name}</strong></span>
+          <span><strong>{me.user?.name}<BroadcasterBadge visible={me.voice.broadcaster} /></strong>{me.voice.canBroadcast === false && <small>Somente espectador</small>}</span>
         </div>
         <div className="media-dock-actions">
-          <Button variant={cameraStream || cameraBusy ? 'secondary' : 'outline'} className={cameraStream ? 'camera-on' : ''} aria-label={cameraBusy ? 'Cancelar câmera' : cameraStream ? 'Desligar câmera' : 'Ligar câmera'} aria-pressed={Boolean(cameraStream)} onClick={() => cameraStream || cameraBusy ? stopCamera() : void startCamera()}>{cameraStream ? <VideoOff /> : <Video />}{cameraBusy ? 'Cancelar' : cameraStream ? 'Desligar' : 'Câmera'}</Button>
+          <Button disabled={!cameraStream && me.voice.canBroadcast === false} variant={cameraStream || cameraBusy ? 'secondary' : 'outline'} className={cameraStream ? 'camera-on' : ''} title={me.voice.canBroadcast === false ? 'Você precisa de um cargo autorizado para transmitir nesta call' : undefined} aria-label={cameraBusy ? 'Cancelar câmera' : cameraStream ? 'Desligar câmera' : 'Ligar câmera'} aria-pressed={Boolean(cameraStream)} onClick={() => cameraStream || cameraBusy ? stopCamera() : void startCamera()}>{cameraStream ? <VideoOff /> : <Video />}{cameraBusy ? 'Cancelar' : cameraStream ? 'Desligar' : 'Câmera'}</Button>
           {sharing ? (
             <Button variant="destructive" onClick={stopSharing} aria-label="Parar transmissão de tela"><CircleStop /> Parar tela</Button>
           ) : (
-            <Button className="share-button" onClick={startSharing} aria-label="Compartilhar tela e áudio"><MonitorUp /> Transmitir</Button>
+            <Button disabled={me.voice.canBroadcast === false} className="share-button" onClick={startSharing} title={me.voice.canBroadcast === false ? 'Você precisa de um cargo autorizado para transmitir nesta call' : undefined} aria-label="Compartilhar tela e áudio"><MonitorUp /> Transmitir</Button>
           )}
           <Popover>
             <PopoverTrigger render={<Button variant="ghost" className="media-settings-trigger" aria-label="Ajustar qualidade, FPS e webcam" title="Qualidade, FPS e webcam" />}><SlidersHorizontal /><span>Ajustes</span></PopoverTrigger>

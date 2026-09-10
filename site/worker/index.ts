@@ -19,10 +19,14 @@ type VoiceLocation = {
   roomKey: string;
   sessionId: string;
   joinedAt: number;
+  canBroadcast: boolean;
+  broadcaster: boolean;
 };
 
+type WaitingState = { reason: 'channel_blocked'; channelName: string };
+
 type SessionUser = { id: string; name: string; avatar: string | null; exp: number };
-type SocketAttachment = SessionUser & { roomKey: string | null; sessionId: string | null; clientInstance?: string | null; sharing: boolean; camera?: boolean; windowStartedAt: number; messageCount: number };
+type SocketAttachment = SessionUser & { roomKey: string | null; sessionId: string | null; clientInstance?: string | null; sharing: boolean; camera?: boolean; canBroadcast: boolean; broadcaster: boolean; windowStartedAt: number; messageCount: number };
 type ChannelState = { sessionId: string; roomKey: string; channelName: string; members: string[]; createdAt: number };
 
 const encoder = new TextEncoder();
@@ -262,7 +266,7 @@ export class VoiceHub extends DurableObject<Env> {
   }
 
   private peer(attachment: SocketAttachment) {
-    return { id: attachment.id, name: attachment.name, avatar: attachment.avatar, sharing: attachment.sharing, camera: Boolean(attachment.camera) };
+    return { id: attachment.id, name: attachment.name, avatar: attachment.avatar, sharing: attachment.sharing, camera: Boolean(attachment.camera), broadcaster: attachment.broadcaster };
   }
 
   private send(socket: WebSocket, value: unknown) {
@@ -293,6 +297,7 @@ export class VoiceHub extends DurableObject<Env> {
 
   private async notifyUser(userId: string) {
     const voice = await this.getVoice(userId);
+    const waiting = (await this.ctx.storage.get<WaitingState>(`waiting:${userId}`)) || null;
     const heartbeat = (await this.ctx.storage.get<number>('heartbeat')) || 0;
     const syncHealthy = Date.now() - heartbeat < 90_000;
     for (const socket of this.ctx.getWebSockets()) {
@@ -300,49 +305,70 @@ export class VoiceHub extends DurableObject<Env> {
       if (socket.readyState !== 1 || attachment?.id !== userId) continue;
       const previousRoom = attachment.roomKey;
       const previousSession = attachment.sessionId;
+      const permissionRevoked = attachment.canBroadcast && voice?.canBroadcast === false;
       const roomChanged = previousRoom !== (voice?.roomKey || null) || previousSession !== (voice?.sessionId || null);
       if (previousRoom && roomChanged) this.broadcast(previousRoom, { type: 'peer_left', userId }, userId);
       attachment.roomKey = voice?.roomKey || null;
       attachment.sessionId = voice?.sessionId || null;
+      attachment.canBroadcast = voice?.canBroadcast ?? false;
+      attachment.broadcaster = voice?.broadcaster ?? false;
       // A sincronização do bot é periódica. Preserve o estado da transmissão
       // enquanto o usuário continuar exatamente na mesma sessão de voz.
-      if (roomChanged) { attachment.sharing = false; attachment.camera = false; }
+      if (roomChanged || permissionRevoked) {
+        if (previousRoom && attachment.sharing) this.broadcast(previousRoom, { type: 'share_state', userId, sharing: false }, userId);
+        if (previousRoom && attachment.camera) this.broadcast(previousRoom, { type: 'camera_state', userId, camera: false }, userId);
+        attachment.sharing = false;
+        attachment.camera = false;
+      }
       socket.serializeAttachment(attachment);
-      this.send(socket, { type: 'voice_state', voice: voice ? { roomKey: voice.roomKey, sessionId: voice.sessionId, channelName: voice.channelName } : null, syncHealthy });
+      this.send(socket, { type: 'voice_state', voice: voice ? { roomKey: voice.roomKey, sessionId: voice.sessionId, channelName: voice.channelName, canBroadcast: voice.canBroadcast, broadcaster: voice.broadcaster } : null, waiting, syncHealthy });
       if (voice) {
         const peers = this.socketsInRoom(voice.roomKey)
           .map(item => item.deserializeAttachment() as SocketAttachment | null)
           .filter((item): item is SocketAttachment => Boolean(item && item.id !== userId))
           .map(item => this.peer(item));
-        this.send(socket, { type: 'session', selfId: userId, roomKey: voice.roomKey, sessionId: voice.sessionId, channelName: voice.channelName, peers });
+        this.send(socket, { type: 'session', selfId: userId, roomKey: voice.roomKey, sessionId: voice.sessionId, channelName: voice.channelName, canBroadcast: voice.canBroadcast, broadcaster: voice.broadcaster, peers });
         if (roomChanged) this.broadcast(voice.roomKey, { type: 'peer_joined', peer: this.peer(attachment) }, userId);
         this.syncRoomRoster(voice.roomKey);
       }
     }
   }
 
-  private async removeUser(userId: string) {
+  private async removeUser(userId: string, notify = true) {
     this.inactiveSince.delete(userId);
     const current = await this.getVoice(userId);
-    if (!current) return;
-    const key = this.channelKey(current.guildId, current.channelId);
-    const channel = await this.ctx.storage.get<ChannelState>(key);
-    if (channel) {
-      channel.members = channel.members.filter(id => id !== userId);
-      if (channel.members.length) await this.ctx.storage.put(key, channel);
-      else await this.ctx.storage.delete(key);
+    if (current) {
+      const key = this.channelKey(current.guildId, current.channelId);
+      const channel = await this.ctx.storage.get<ChannelState>(key);
+      if (channel) {
+        channel.members = channel.members.filter(id => id !== userId);
+        if (channel.members.length) await this.ctx.storage.put(key, channel);
+        else await this.ctx.storage.delete(key);
+      }
+      await this.ctx.storage.delete(`user:${userId}`);
     }
-    await this.ctx.storage.delete(`user:${userId}`);
+    await this.ctx.storage.delete(`waiting:${userId}`);
+    if (notify) await this.notifyUser(userId);
+  }
+
+  private async placeBlockedUser(userId: string, channelName: string) {
+    const current = await this.getVoice(userId);
+    const previous = await this.ctx.storage.get<WaitingState>(`waiting:${userId}`);
+    if (!current && previous?.channelName === channelName) return;
+    await this.removeUser(userId, false);
+    await this.ctx.storage.put(`waiting:${userId}`, { reason: 'channel_blocked', channelName } satisfies WaitingState);
     await this.notifyUser(userId);
   }
 
-  private async placeUser(guildId: string, channelId: string, userId: string, channelName: string) {
+  private async placeUser(guildId: string, channelId: string, userId: string, channelName: string, canBroadcast: boolean, broadcaster: boolean) {
+    if (await this.ctx.storage.get<WaitingState>(`waiting:${userId}`)) await this.ctx.storage.delete(`waiting:${userId}`);
     const current = await this.getVoice(userId);
     if (current?.guildId === guildId && current.channelId === channelId) {
       const key = this.channelKey(guildId, channelId);
       let channel = await this.ctx.storage.get<ChannelState>(key);
       if (channel && channel.channelName === channelName && channel.members.includes(userId)
-        && current.channelName === channelName && current.roomKey === channel.roomKey && current.sessionId === channel.sessionId) {
+        && current.channelName === channelName && current.roomKey === channel.roomKey && current.sessionId === channel.sessionId
+        && (current.canBroadcast ?? true) === canBroadcast && (current.broadcaster ?? false) === broadcaster) {
         // A new browser socket may need a session, but unchanged state needs no writes.
         const needsSession = this.ctx.getWebSockets().some(socket => {
           const item = socket.deserializeAttachment() as SocketAttachment | null;
@@ -361,6 +387,8 @@ export class VoiceHub extends DurableObject<Env> {
       current.channelName = channelName;
       current.roomKey = channel.roomKey;
       current.sessionId = channel.sessionId;
+      current.canBroadcast = canBroadcast;
+      current.broadcaster = broadcaster;
       await this.ctx.storage.put(`user:${userId}`, current);
       await this.notifyUser(userId);
       this.syncRoomRoster(channel.roomKey);
@@ -373,7 +401,7 @@ export class VoiceHub extends DurableObject<Env> {
     else channel.channelName = channelName;
     if (!channel.members.includes(userId)) channel.members.push(userId);
     await this.ctx.storage.put(key, channel);
-    await this.ctx.storage.put(`user:${userId}`, { guildId, channelId, channelName, roomKey: channel.roomKey, sessionId: channel.sessionId, joinedAt: Date.now() } satisfies VoiceLocation);
+    await this.ctx.storage.put(`user:${userId}`, { guildId, channelId, channelName, roomKey: channel.roomKey, sessionId: channel.sessionId, joinedAt: Date.now(), canBroadcast, broadcaster } satisfies VoiceLocation);
     await this.notifyUser(userId);
   }
 
@@ -405,7 +433,8 @@ export class VoiceHub extends DurableObject<Env> {
       if (payload.newChannelId === null) await this.removeUser(payload.userId);
       else if (this.validSnowflake(payload.newChannelId)) {
         const channelName = typeof payload.newChannelName === 'string' && payload.newChannelName.length > 0 && payload.newChannelName.length <= 100 ? payload.newChannelName : 'Call do Discord';
-        await this.placeUser(guildId, payload.newChannelId, payload.userId, channelName);
+        if (payload.blocked === true) await this.placeBlockedUser(payload.userId, channelName);
+        else await this.placeUser(guildId, payload.newChannelId, payload.userId, channelName, payload.canBroadcast !== false, payload.hasBroadcastRole === true);
       }
       else throw new Error('invalid_channel');
       return;
@@ -413,16 +442,20 @@ export class VoiceHub extends DurableObject<Env> {
 
     if (payload.type === 'snapshot') {
       if (!Array.isArray(payload.channels) || payload.channels.length > 500) throw new Error('invalid_snapshot');
-      const desired = new Map<string, { channelId: string; channelName: string }>();
+      const desired = new Map<string, { channelId: string; channelName: string; canBroadcast: boolean; broadcaster: boolean }>();
+      const blocked = new Map<string, string>();
       const activeUsers = this.activeUserIds();
       for (const raw of payload.channels) {
         if (!raw || typeof raw !== 'object') throw new Error('invalid_snapshot');
-        const channel = raw as { channelId?: unknown; channelName?: unknown; userIds?: unknown };
-        if (!this.validSnowflake(channel.channelId) || (channel.channelName !== undefined && (typeof channel.channelName !== 'string' || channel.channelName.length < 1 || channel.channelName.length > 100)) || !Array.isArray(channel.userIds) || channel.userIds.length > 100) throw new Error('invalid_snapshot');
+        const channel = raw as { channelId?: unknown; channelName?: unknown; userIds?: unknown; broadcasterUserIds?: unknown; blocked?: unknown; unrestricted?: unknown; restricted?: unknown };
+        if (!this.validSnowflake(channel.channelId) || (channel.channelName !== undefined && (typeof channel.channelName !== 'string' || channel.channelName.length < 1 || channel.channelName.length > 100)) || !Array.isArray(channel.userIds) || channel.userIds.length > 100 || (channel.broadcasterUserIds !== undefined && !Array.isArray(channel.broadcasterUserIds))) throw new Error('invalid_snapshot');
         const channelName = typeof channel.channelName === 'string' ? channel.channelName : 'Call do Discord';
+        const broadcasters = new Set((channel.broadcasterUserIds || []).filter((id): id is string => this.validSnowflake(id)));
         for (const userId of channel.userIds) {
           if (!this.validSnowflake(userId)) throw new Error('invalid_snapshot');
-          if (activeUsers.has(userId)) desired.set(userId, { channelId: channel.channelId, channelName });
+          if (!activeUsers.has(userId)) continue;
+          if (channel.blocked === true) blocked.set(userId, channelName);
+          else desired.set(userId, { channelId: channel.channelId, channelName, canBroadcast: channel.restricted !== true || channel.unrestricted === true || broadcasters.has(userId), broadcaster: broadcasters.has(userId) });
         }
       }
       const current = await this.ctx.storage.list<VoiceLocation>({ prefix: 'user:' });
@@ -433,6 +466,9 @@ export class VoiceHub extends DurableObject<Env> {
           this.inactiveSince.delete(userId);
           continue;
         }
+        // An active browser missing from Discord's snapshot really left voice.
+        // A temporarily absent socket gets a short grace period so reconnects
+        // and Worker deployments do not tear down an otherwise valid room.
         if (activeUsers.has(userId)) {
           await this.removeUser(userId);
           continue;
@@ -444,9 +480,18 @@ export class VoiceHub extends DurableObject<Env> {
         }
         if (Date.now() - missingSince >= 15_000) await this.removeUser(userId);
       }
+      const currentWaiting = await this.ctx.storage.list<WaitingState>({ prefix: 'waiting:' });
+      for (const key of currentWaiting.keys()) {
+        const userId = key.slice(8);
+        if (activeUsers.has(userId) && !blocked.has(userId) && !desired.has(userId)) await this.removeUser(userId);
+      }
       for (const [userId, channel] of desired) {
         this.inactiveSince.delete(userId);
-        await this.placeUser(guildId, channel.channelId, userId, channel.channelName);
+        await this.placeUser(guildId, channel.channelId, userId, channel.channelName, channel.canBroadcast, channel.broadcaster);
+      }
+      for (const [userId, channelName] of blocked) {
+        this.inactiveSince.delete(userId);
+        await this.placeBlockedUser(userId, channelName);
       }
       return;
     }
@@ -468,8 +513,9 @@ export class VoiceHub extends DurableObject<Env> {
     if (url.pathname === '/state') {
       const userId = request.headers.get('x-user-id') || '';
       const voice = await this.getVoice(userId);
+      const waiting = (await this.ctx.storage.get<WaitingState>(`waiting:${userId}`)) || null;
       const heartbeat = (await this.ctx.storage.get<number>('heartbeat')) || 0;
-      return json({ voice: voice ? { roomKey: voice.roomKey, sessionId: voice.sessionId, channelName: voice.channelName } : null, syncHealthy: Date.now() - heartbeat < 90_000 });
+      return json({ voice: voice ? { roomKey: voice.roomKey, sessionId: voice.sessionId, channelName: voice.channelName, canBroadcast: voice.canBroadcast, broadcaster: voice.broadcaster } : null, waiting, syncHealthy: Date.now() - heartbeat < 90_000 });
     }
     if (url.pathname === '/health') {
       const heartbeat = (await this.ctx.storage.get<number>('heartbeat')) || 0;
@@ -482,6 +528,7 @@ export class VoiceHub extends DurableObject<Env> {
       const clientInstance = request.headers.get('x-client-instance') || null;
       if (!SNOWFLAKE.test(userId)) return new Response('Unauthorized', { status: 401 });
       const voice = await this.getVoice(userId);
+      const waiting = (await this.ctx.storage.get<WaitingState>(`waiting:${userId}`)) || null;
       const heartbeat = (await this.ctx.storage.get<number>('heartbeat')) || 0;
       const healthy = Date.now() - heartbeat < 90_000;
       const pair = new WebSocketPair();
@@ -499,16 +546,16 @@ export class VoiceHub extends DurableObject<Env> {
       }
       const requestedExpiry = Number(request.headers.get('x-session-exp'));
       const exp = Number.isFinite(requestedExpiry) ? Math.min(requestedExpiry, Date.now() + SESSION_TTL_MS) : Date.now() + SESSION_TTL_MS;
-      const attachment: SocketAttachment = { id: userId, name, avatar, exp, roomKey: healthy ? voice?.roomKey || null : null, sessionId: healthy ? voice?.sessionId || null : null, clientInstance, sharing: false, windowStartedAt: Date.now(), messageCount: 0 };
+      const attachment: SocketAttachment = { id: userId, name, avatar, exp, roomKey: healthy ? voice?.roomKey || null : null, sessionId: healthy ? voice?.sessionId || null : null, clientInstance, sharing: false, canBroadcast: healthy ? voice?.canBroadcast ?? false : false, broadcaster: healthy ? voice?.broadcaster ?? false : false, windowStartedAt: Date.now(), messageCount: 0 };
       server.serializeAttachment(attachment);
       this.ctx.acceptWebSocket(server);
-      if (!voice || !healthy) this.send(server, { type: 'waiting', syncHealthy: healthy });
+      if (!voice || !healthy) this.send(server, { type: 'waiting', syncHealthy: healthy, waiting: healthy ? waiting : null });
       else {
         const peers = this.socketsInRoom(voice.roomKey)
           .map(item => item.deserializeAttachment() as SocketAttachment | null)
           .filter((item): item is SocketAttachment => Boolean(item && item.id !== userId))
           .map(item => this.peer(item));
-        this.send(server, { type: 'session', selfId: userId, roomKey: voice.roomKey, sessionId: voice.sessionId, channelName: voice.channelName, peers });
+        this.send(server, { type: 'session', selfId: userId, roomKey: voice.roomKey, sessionId: voice.sessionId, channelName: voice.channelName, canBroadcast: voice.canBroadcast, broadcaster: voice.broadcaster, peers });
         this.broadcast(voice.roomKey, { type: 'peer_joined', peer: this.peer(attachment) }, userId);
         this.syncRoomRoster(voice.roomKey);
       }
@@ -558,6 +605,10 @@ export class VoiceHub extends DurableObject<Env> {
     }
 
     if (value.type === 'camera_state' && typeof value.camera === 'boolean') {
+      if (value.camera && !voice.canBroadcast) {
+        this.send(socket, { type: 'error', code: 'broadcast_forbidden', message: 'Você não possui o cargo necessário para ligar a câmera nesta call.' });
+        return;
+      }
       attachment.camera = value.camera;
       socket.serializeAttachment(attachment);
       this.broadcast(voice.roomKey, { type: 'camera_state', userId: attachment.id, camera: value.camera }, attachment.id);
@@ -566,6 +617,10 @@ export class VoiceHub extends DurableObject<Env> {
     if (value.media !== undefined && value.media !== 'screen' && value.media !== 'camera') return;
     const media = value.media === 'camera' ? 'camera' : 'screen';
     if (value.type === 'share_state' && typeof value.sharing === 'boolean') {
+      if (value.sharing && !voice.canBroadcast) {
+        this.send(socket, { type: 'error', code: 'broadcast_forbidden', message: 'Você não possui o cargo necessário para transmitir nesta call.' });
+        return;
+      }
       attachment.sharing = value.sharing;
       socket.serializeAttachment(attachment);
       this.broadcast(voice.roomKey, { type: 'share_state', userId: attachment.id, sharing: value.sharing }, attachment.id);
@@ -730,7 +785,7 @@ export default {
         if (limited) response = limited;
         else {
           const cached = meResponseCache.get(session.id);
-          let voice: { voice: VoiceLocation | null; syncHealthy: boolean };
+          let voice: { voice: VoiceLocation | null; waiting: WaitingState | null; syncHealthy: boolean };
           if (cached && cached.expiresAt > Date.now()) voice = cached.value as typeof voice;
           else {
             const state = await hub(env).fetch(new Request('https://internal/state', { headers: { 'x-user-id': session.id } }));
@@ -738,7 +793,7 @@ export default {
             if (meResponseCache.size >= 1_000) meResponseCache.clear();
             meResponseCache.set(session.id, { expiresAt: Date.now() + 2_000, value: voice });
           }
-          response = json({ authenticated: true, user: { id: session.id, name: session.name, avatar: session.avatar }, voice: voice.voice, syncHealthy: voice.syncHealthy });
+          response = json({ authenticated: true, user: { id: session.id, name: session.name, avatar: session.avatar }, voice: voice.voice, waiting: voice.waiting, syncHealthy: voice.syncHealthy });
         }
       }
     } else if (url.pathname === '/api/health' && request.method !== 'GET') {

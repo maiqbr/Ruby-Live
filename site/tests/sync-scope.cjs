@@ -70,7 +70,10 @@ async function main() {
   assert.equal(writes, 0, 'heartbeats within 30 seconds do not write');
   sockets = [];
   await hub.applySync(snapshot, 'event-3');
-  assert.equal([...db.keys()].filter(key => key.startsWith('user:')).length, 0);
+  assert.equal([...db.keys()].filter(key => key.startsWith('user:')).length, 2, 'one missing-socket snapshot is tolerated');
+  for (const userId of ids.slice(0, 2)) hub.inactiveSince.set(userId, Date.now() - 16000);
+  await hub.applySync(snapshot, 'event-3b');
+  assert.equal([...db.keys()].filter(key => key.startsWith('user:')).length, 0, 'continued absence is removed after the grace period');
   await hub.applySync({ type: 'voice_event', guildId: snapshot.guildId, userId: ids[80], newChannelId: snapshot.channels[0].channelId }, 'event-4');
   assert.equal(db.has(`user:${ids[80]}`), false);
 
@@ -97,15 +100,17 @@ async function main() {
   let pollInterval;
   const botModule = { exports: {} };
   vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../../bot/src/liveSyncService.cjs'), 'utf8'), {
-    module: botModule, require, process: { env: { LIVE_SYNC_URL: 'https://live.example.com/api/internal/voice-sync', LIVE_SYNC_SECRET: 'x'.repeat(32) } }, console,
+    module: botModule, require, process: { env: { LIVE_SYNC_URL: 'https://live.example.com/api/internal/voice-sync', LIVE_SYNC_SECRET: 'x'.repeat(32), LIVE_SYNC_BLOCKED_CATEGORY_IDS: '400000000000000001', LIVE_SYNC_UNRESTRICTED_CATEGORY_IDS: '400000000000000001' } }, console,
     AbortSignal, setTimeout, clearInterval() {}, setInterval(_callback, delay) { pollInterval = delay; return { unref() {} }; },
     fetch: async (_url, options) => { sent.push(JSON.parse(options.body)); return { ok: true, json: async () => ({ activeUserIds: connectedIds }) }; },
   });
-  const guild = { id: snapshot.guildId, voiceStates: { cache: new Map(ids.map(id => [id, { id, channelId: snapshot.channels[0].channelId, channel: { name: 'Test' } }])) } };
+  const guild = { id: snapshot.guildId, voiceStates: { cache: new Map(ids.map(id => [id, { id, channelId: snapshot.channels[0].channelId, channel: { name: 'Test', parentId: '400000000000000001' } }])) } };
   await botModule.exports.start({ isReady: () => true, guilds: { cache: new Map([[guild.id, guild]]) } });
   assert.equal(pollInterval, 5_000, 'new browser sessions use the quota-conscious polling window');
   assert.equal(sent[0].type, 'heartbeat');
   assert.deepEqual(sent.find(p => p.type === 'snapshot').channels[0].userIds, ids.slice(0, 2));
+  assert.equal(sent.find(p => p.type === 'snapshot').channels[0].blocked, true, 'blocked category applies to its voice channels');
+  assert.equal(sent.find(p => p.type === 'snapshot').channels[0].unrestricted, true, 'unrestricted category applies to its voice channels');
   const before = sent.length;
   await botModule.exports.handleVoiceStateUpdate({ channelId: null }, { id: ids[50], channelId: '123', guild });
   assert.equal(sent.length, before, 'unrelated Discord members send no events');

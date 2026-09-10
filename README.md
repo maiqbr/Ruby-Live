@@ -106,7 +106,22 @@ DISCORD_TOKEN=INSIRA_O_TOKEN_DO_BOT_DISCORD
 LIVE_SYNC_URL=https://live.example.com/api/internal/voice-sync
 LIVE_SYNC_SECRET=INSIRA_EXATAMENTE_O_MESMO_SEGREDO_DO_WORKER
 LIVE_SYNC_GUILD_IDS=INSIRA_O_MESMO_ID_DE_SERVIDOR_CONFIGURADO_NO_WORKER
+LIVE_SYNC_BLOCKED_CHANNEL_IDS=
+LIVE_SYNC_BLOCKED_CATEGORY_IDS=
+LIVE_SYNC_BROADCAST_ROLE_IDS=
+LIVE_SYNC_UNRESTRICTED_CHANNEL_IDS=
+LIVE_SYNC_UNRESTRICTED_CATEGORY_IDS=
 ```
+
+As três últimas opções são listas de IDs separadas por vírgula:
+
+- `LIVE_SYNC_BLOCKED_CHANNEL_IDS`: calls que não criam sala no site.
+- `LIVE_SYNC_BLOCKED_CATEGORY_IDS`: categorias cujas calls, inclusive temporárias, não criam sala.
+- `LIVE_SYNC_BROADCAST_ROLE_IDS`: cargos que podem transmitir tela ou câmera. Vazio mantém a transmissão liberada para todos.
+- `LIVE_SYNC_UNRESTRICTED_CHANNEL_IDS`: calls que dispensam os cargos acima.
+- `LIVE_SYNC_UNRESTRICTED_CATEGORY_IDS`: categorias cujas calls dispensam os cargos acima, inclusive canais criados depois.
+
+Canais bloqueados têm prioridade sobre canais sem restrição. O bot precisa estar no servidor e usar o intent de estados de voz para validar os cargos presentes no evento. Reinicie o bot depois de alterar essas listas.
 
 Troque a URL pela sua. Execute da raiz:
 

@@ -9,6 +9,14 @@ const allowedGuildIds = new Set(
     .map(id => id.trim())
     .filter(Boolean),
 );
+function idSet(name) {
+  return new Set((process.env[name] || '').split(',').map(id => id.trim()).filter(id => /^\d{15,22}$/.test(id)));
+}
+const blockedChannelIds = idSet('LIVE_SYNC_BLOCKED_CHANNEL_IDS');
+const blockedCategoryIds = idSet('LIVE_SYNC_BLOCKED_CATEGORY_IDS');
+const unrestrictedChannelIds = idSet('LIVE_SYNC_UNRESTRICTED_CHANNEL_IDS');
+const unrestrictedCategoryIds = idSet('LIVE_SYNC_UNRESTRICTED_CATEGORY_IDS');
+const broadcastRoleIds = idSet('LIVE_SYNC_BROADCAST_ROLE_IDS');
 const SNAPSHOT_INTERVAL_MS = 60_000;
 const configuredPollInterval = Number(process.env.LIVE_SYNC_POLL_INTERVAL_MS);
 const POLL_INTERVAL_MS = Number.isFinite(configuredPollInterval) && configuredPollInterval > 0
@@ -48,6 +56,15 @@ function enabled() {
 
 function guildAllowed(guildId) {
   return allowedGuildIds.size === 0 || allowedGuildIds.has(guildId);
+}
+
+function voicePolicy(state) {
+  const channelId = state.channelId;
+  const categoryId = state.channel?.parentId || null;
+  const blocked = Boolean(channelId && blockedChannelIds.has(channelId)) || Boolean(categoryId && blockedCategoryIds.has(categoryId));
+  const unrestricted = Boolean(channelId && unrestrictedChannelIds.has(channelId)) || Boolean(categoryId && unrestrictedCategoryIds.has(categoryId));
+  const hasBroadcastRole = broadcastRoleIds.size > 0 && Boolean(state.member?.roles?.cache?.some(role => broadcastRoleIds.has(role.id)));
+  return { blocked, unrestricted, hasBroadcastRole, canBroadcast: broadcastRoleIds.size === 0 || unrestricted || hasBroadcastRole };
 }
 
 function pauseSync(code, status, retryAfter) {
@@ -121,11 +138,17 @@ function voiceMembersForGuild(guild) {
   for (const userId of activeUserIds) {
     const state = guild.voiceStates.cache.get(userId);
     if (!state?.channelId || state.member?.user?.bot) continue;
+    const policy = voicePolicy(state);
     const entry = channels.get(state.channelId) || {
       channelName: state.channel?.name || 'Call do Discord',
       userIds: [],
+      broadcasterUserIds: [],
+      blocked: policy.blocked,
+      unrestricted: policy.unrestricted,
+      restricted: broadcastRoleIds.size > 0,
     };
     entry.userIds.push(state.id);
+    if (policy.hasBroadcastRole) entry.broadcasterUserIds.push(state.id);
     channels.set(state.channelId, entry);
   }
 
@@ -133,6 +156,10 @@ function voiceMembersForGuild(guild) {
     channelId,
     channelName: entry.channelName,
     userIds: [...new Set(entry.userIds)].sort(),
+    broadcasterUserIds: [...new Set(entry.broadcasterUserIds)].sort(),
+    blocked: entry.blocked,
+    unrestricted: entry.unrestricted,
+    restricted: entry.restricted,
   }));
 }
 
@@ -155,7 +182,7 @@ async function sendGuildSnapshot(guild, force) {
 }
 
 async function sendFullSnapshot(force = true) {
-  if (!enabled() || !clientRef?.isReady() || polling || Date.now() < syncPausedUntil) return;
+  if (!enabled() || !clientRef?.isReady() || polling || Date.now() < syncPausedUntil) return false;
   polling = true;
   try {
     const healthy = await postSigned({
@@ -167,14 +194,15 @@ async function sendFullSnapshot(force = true) {
       guildCount: [...clientRef.guilds.cache.keys()].filter(guildAllowed).length,
       occurredAt: Date.now(),
     });
-    if (!healthy) return;
+    if (!healthy) return false;
     for (const guild of clientRef.guilds.cache.values()) {
       if (!guildAllowed(guild.id)) continue;
-      if (!(await sendGuildSnapshot(guild, force))) return;
+      if (!(await sendGuildSnapshot(guild, force))) return false;
     }
     failureStreak = 0;
     if (recoveryPending) console.log('[live-sync] sincronização restabelecida; estado atual das calls reconciliado.');
     recoveryPending = false;
+    return true;
   } finally {
     polling = false;
   }
@@ -186,6 +214,7 @@ async function handleVoiceStateUpdate(oldState, newState) {
   if (!guildAllowed(newState.guild.id)) return;
   if (!activeUserIds.has(newState.id)) return;
 
+  const policy = voicePolicy(newState);
   await postSigned({
     version: 1,
     type: 'voice_event',
@@ -196,6 +225,10 @@ async function handleVoiceStateUpdate(oldState, newState) {
     oldChannelId: oldState.channelId,
     newChannelId: newState.channelId,
     newChannelName: newState.channel?.name || null,
+    blocked: policy.blocked,
+    unrestricted: policy.unrestricted,
+    hasBroadcastRole: policy.hasBroadcastRole,
+    canBroadcast: policy.canBroadcast,
     occurredAt: Date.now(),
   });
 }
@@ -207,13 +240,13 @@ async function start(client) {
     return;
   }
 
-  await sendFullSnapshot();
+  const synchronized = await sendFullSnapshot();
   if (snapshotTimer) clearInterval(snapshotTimer);
   snapshotTimer = setInterval(() => {
     sendFullSnapshot(false).catch(() => pauseSync('sync_unavailable', 0, null));
   }, POLL_INTERVAL_MS);
   snapshotTimer.unref?.();
-  if (!recoveryPending) console.log('[live-sync] sincronização ativa com o site da live.');
+  if (synchronized) console.log('[live-sync] sincronização ativa com o site da live.');
 }
 
 module.exports = {

@@ -105,6 +105,9 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .participant-row.selected { background:rgba(242,201,76,.11); box-shadow:inset 0 0 0 1px rgba(242,201,76,.24); }
 .participant-row > span:nth-child(2) { min-width:0; display:flex; flex-direction:column; }
 .participant-row strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
+.participant-row strong, .identity strong, .camera-person strong { display:flex; align-items:center; gap:5px; }
+.broadcaster-badge { width:20px; height:20px; flex:0 0 auto; object-fit:contain; filter:drop-shadow(0 3px 5px rgba(0,0,0,.45)); }
+.tile-caption > .broadcaster-badge { width:18px; height:18px; }
 .participant-row small { margin-top:2px; color:#737d89; font-size:10px; }
 .participant-live { width:7px; height:7px; border-radius:50%; background:#3a424d; }
 .participant-live.active { background:#e95050; box-shadow:0 0 10px rgba(233,80,80,.7); }

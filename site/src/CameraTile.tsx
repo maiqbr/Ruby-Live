@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { openMediaFullscreen } from './fullscreen';
 
 type Props = {
-  user: { id: string; name: string; avatar: string | null };
+  user: { id: string; name: string; avatar: string | null; broadcaster?: boolean };
   stream?: MediaStream;
   stats?: { width?: number; height?: number; fps?: number; bitrate?: number; limited: boolean };
   actualLabel?: string;
@@ -46,7 +46,7 @@ export function CameraTile({ user, stream, stats, actualLabel, watching, local, 
         {stats && <span className={stats.limited ? 'stream-stats camera-stats limited' : 'stream-stats camera-stats'}>{[stats.width && stats.height ? `${stats.width}×${stats.height}` : '', stats.fps ? `${Math.round(stats.fps)} FPS` : '', stats.bitrate ? `${stats.bitrate.toFixed(1)} Mbps` : ''].filter(Boolean).join(' · ') || 'Analisando…'}</span>}
       </button>
       {playBlocked && <Button size="sm" className="camera-play" onClick={() => void videoRef.current?.play().then(() => setPlayBlocked(false)).catch(() => undefined)}>Reproduzir câmera</Button>}
-      <div className="camera-caption"><span className="camera-person"><strong>{local ? 'Você' : user.name}</strong><small>{local ? `${actualLabel || 'Verificando captura…'} · sem microfone` : watching ? 'Recebendo câmera' : 'Disponível · não recebendo'}</small></span>
+      <div className="camera-caption"><span className="camera-person"><strong>{local ? 'Você' : user.name}{user.broadcaster && <img className="broadcaster-badge" src="/broadcaster.svg" alt="" title="Pode transmitir" />}</strong><small>{local ? `${actualLabel || 'Verificando captura…'} · sem microfone` : watching ? 'Recebendo câmera' : 'Disponível · não recebendo'}</small></span>
         <Button size="xs" variant={watching ? 'secondary' : 'default'} onClick={onToggle}>{local ? 'Desligar' : watching ? 'Parar' : 'Ver'}</Button>
         {watching && <Button size="icon-xs" variant="ghost" onClick={onFocus} aria-label={focused ? 'Reduzir câmera' : 'Destacar câmera'} title={focused ? 'Reduzir câmera' : 'Destacar câmera'}>{focused ? <Minimize2 /> : <Maximize2 />}</Button>}
         {stream && watching && <Button size="icon-xs" variant="ghost" onClick={() => void enterFullscreen()} aria-label="Câmera em tela cheia" title="Tela cheia"><Maximize /></Button>}
