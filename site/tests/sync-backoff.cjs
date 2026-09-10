@@ -11,7 +11,10 @@ function harness() {
   const calls = [];
   let reply = () => ({ ok: true, status: 200, json: async () => ({ accepted: true, activeUserIds: [] }) });
   const bot = { exports: {} };
-  vm.runInNewContext(source, { module: bot, require, Date: FakeDate, process: { env: { LIVE_SYNC_URL: 'https://live.example.com/api/internal/voice-sync', LIVE_SYNC_SECRET: 'private-secret-do-not-log'.repeat(2) } },
+  const botRequire = specifier => specifier === './liveConfig.cjs'
+    ? { getConfig: () => ({ blocked_channel_ids: [], blocked_category_ids: [], broadcast_role_ids: [], unrestricted_channel_ids: [], unrestricted_category_ids: [] }) }
+    : require(specifier);
+  vm.runInNewContext(source, { module: bot, require: botRequire, Date: FakeDate, process: { env: { LIVE_SYNC_URL: 'https://live.example.com/api/internal/voice-sync', LIVE_SYNC_SECRET: 'private-secret-do-not-log'.repeat(2) } },
     console: { log: (...args) => logs.push(args.join(' ')), error: (...args) => logs.push(args.join(' ')), warn: (...args) => logs.push(args.join(' ')) },
     AbortSignal, setInterval: () => ({ unref() {} }), clearInterval() {},
     fetch: async (_url, options) => { calls.push(JSON.parse(options.body)); return reply(); },

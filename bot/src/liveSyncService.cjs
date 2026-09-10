@@ -1,4 +1,5 @@
 const crypto = require('node:crypto');
+const liveConfig = require('./liveConfig.cjs');
 
 const endpoint = process.env.LIVE_SYNC_URL || '';
 const secret = process.env.LIVE_SYNC_SECRET || '';
@@ -9,14 +10,6 @@ const allowedGuildIds = new Set(
     .map(id => id.trim())
     .filter(Boolean),
 );
-function idSet(name) {
-  return new Set((process.env[name] || '').split(',').map(id => id.trim()).filter(id => /^\d{15,22}$/.test(id)));
-}
-const blockedChannelIds = idSet('LIVE_SYNC_BLOCKED_CHANNEL_IDS');
-const blockedCategoryIds = idSet('LIVE_SYNC_BLOCKED_CATEGORY_IDS');
-const unrestrictedChannelIds = idSet('LIVE_SYNC_UNRESTRICTED_CHANNEL_IDS');
-const unrestrictedCategoryIds = idSet('LIVE_SYNC_UNRESTRICTED_CATEGORY_IDS');
-const broadcastRoleIds = idSet('LIVE_SYNC_BROADCAST_ROLE_IDS');
 const SNAPSHOT_INTERVAL_MS = 60_000;
 const configuredPollInterval = Number(process.env.LIVE_SYNC_POLL_INTERVAL_MS);
 const POLL_INTERVAL_MS = Number.isFinite(configuredPollInterval) && configuredPollInterval > 0
@@ -58,9 +51,20 @@ function guildAllowed(guildId) {
   return allowedGuildIds.size === 0 || allowedGuildIds.has(guildId);
 }
 
-function voicePolicy(state) {
+function compilePolicy(config) {
+  return {
+    blockedChannelIds: new Set(config.blocked_channel_ids),
+    blockedCategoryIds: new Set(config.blocked_category_ids),
+    unrestrictedChannelIds: new Set(config.unrestricted_channel_ids),
+    unrestrictedCategoryIds: new Set(config.unrestricted_category_ids),
+    broadcastRoleIds: new Set(config.broadcast_role_ids),
+  };
+}
+
+function voicePolicy(state, config) {
   const channelId = state.channelId;
   const categoryId = state.channel?.parentId || null;
+  const { blockedChannelIds, blockedCategoryIds, unrestrictedChannelIds, unrestrictedCategoryIds, broadcastRoleIds } = config;
   const blocked = Boolean(channelId && blockedChannelIds.has(channelId)) || Boolean(categoryId && blockedCategoryIds.has(categoryId));
   const unrestricted = Boolean(channelId && unrestrictedChannelIds.has(channelId)) || Boolean(categoryId && unrestrictedCategoryIds.has(categoryId));
   const hasBroadcastRole = broadcastRoleIds.size > 0 && Boolean(state.member?.roles?.cache?.some(role => broadcastRoleIds.has(role.id)));
@@ -135,17 +139,18 @@ async function postSigned(payload) {
 
 function voiceMembersForGuild(guild) {
   const channels = new Map();
+  const config = compilePolicy(liveConfig.getConfig(guild.id));
   for (const userId of activeUserIds) {
     const state = guild.voiceStates.cache.get(userId);
     if (!state?.channelId || state.member?.user?.bot) continue;
-    const policy = voicePolicy(state);
+    const policy = voicePolicy(state, config);
     const entry = channels.get(state.channelId) || {
       channelName: state.channel?.name || 'Call do Discord',
       userIds: [],
       broadcasterUserIds: [],
       blocked: policy.blocked,
       unrestricted: policy.unrestricted,
-      restricted: broadcastRoleIds.size > 0,
+      restricted: config.broadcastRoleIds.size > 0,
     };
     entry.userIds.push(state.id);
     if (policy.hasBroadcastRole) entry.broadcasterUserIds.push(state.id);
@@ -214,7 +219,7 @@ async function handleVoiceStateUpdate(oldState, newState) {
   if (!guildAllowed(newState.guild.id)) return;
   if (!activeUserIds.has(newState.id)) return;
 
-  const policy = voicePolicy(newState);
+  const policy = voicePolicy(newState, compilePolicy(liveConfig.getConfig(newState.guild.id)));
   await postSigned({
     version: 1,
     type: 'voice_event',

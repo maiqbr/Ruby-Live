@@ -99,8 +99,11 @@ async function main() {
   let connectedIds = ids.slice(0, 2);
   let pollInterval;
   const botModule = { exports: {} };
+  const botRequire = specifier => specifier === './liveConfig.cjs'
+    ? { getConfig: () => ({ blocked_channel_ids: [], blocked_category_ids: ['400000000000000001'], broadcast_role_ids: [], unrestricted_channel_ids: [], unrestricted_category_ids: ['400000000000000001'] }) }
+    : require(specifier);
   vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../../bot/src/liveSyncService.cjs'), 'utf8'), {
-    module: botModule, require, process: { env: { LIVE_SYNC_URL: 'https://live.example.com/api/internal/voice-sync', LIVE_SYNC_SECRET: 'x'.repeat(32), LIVE_SYNC_BLOCKED_CATEGORY_IDS: '400000000000000001', LIVE_SYNC_UNRESTRICTED_CATEGORY_IDS: '400000000000000001' } }, console,
+    module: botModule, require: botRequire, process: { env: { LIVE_SYNC_URL: 'https://live.example.com/api/internal/voice-sync', LIVE_SYNC_SECRET: 'x'.repeat(32) } }, console,
     AbortSignal, setTimeout, clearInterval() {}, setInterval(_callback, delay) { pollInterval = delay; return { unref() {} }; },
     fetch: async (_url, options) => { sent.push(JSON.parse(options.body)); return { ok: true, json: async () => ({ activeUserIds: connectedIds }) }; },
   });

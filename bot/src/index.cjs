@@ -27,10 +27,24 @@ try {
 }
 
 const sync = require('./liveSyncService.cjs');
+const liveConfig = require('./liveConfig.cjs');
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates] });
 
-client.once(Events.ClientReady, () => {
+client.once(Events.ClientReady, async () => {
+  try {
+    await client.application.commands.set([liveConfig.command.toJSON()]);
+  } catch {
+    console.error('[live-config] não foi possível registrar o comando /liveconfig.');
+  }
   sync.start(client).catch(() => console.error('[live-sync] falha ao iniciar a sincronização.'));
+});
+client.on(Events.InteractionCreate, interaction => {
+  Promise.resolve(liveConfig.handleInteraction(interaction, sync)).catch(error => {
+    console.error('[live-config] falha ao processar interação:', error);
+    if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
+      void interaction.reply({ content: 'Não foi possível atualizar a configuração.', ephemeral: true }).catch(() => {});
+    }
+  });
 });
 client.on(Events.VoiceStateUpdate, (before, after) => {
   Promise.resolve(sync.handleVoiceStateUpdate(before, after)).catch(() => {
