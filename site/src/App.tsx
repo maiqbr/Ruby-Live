@@ -89,7 +89,7 @@ function StatsBadge({ stats }: { stats?: PlaybackStats }) {
 }
 
 function BroadcasterBadge({ visible }: { visible?: boolean }) {
-  return visible ? <img className="broadcaster-badge" src="/broadcaster.svg" alt="" title="Pode transmitir" /> : null;
+  return visible ? <img className="broadcaster-badge" src="/verificado.png" alt="" title="Pode transmitir" /> : null;
 }
 
 function VideoTile({ peer, stream, watching, focused, stats, onToggle, onFocus }: { peer: Peer; stream?: MediaStream; watching: boolean; focused: boolean; stats?: PlaybackStats; onToggle: () => void; onFocus: () => void }) {
