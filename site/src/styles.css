@@ -106,8 +106,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .participant-row > span:nth-child(2) { min-width:0; display:flex; flex-direction:column; }
 .participant-row strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
 .participant-row strong, .identity strong, .camera-person strong { display:flex; align-items:center; gap:5px; }
-.broadcaster-badge { width:20px; height:20px; flex:0 0 auto; object-fit:contain; filter:drop-shadow(0 3px 5px rgba(0,0,0,.45)); }
-.tile-caption > .broadcaster-badge { width:18px; height:18px; }
+.broadcaster-badge { width:16px; height:16px; flex:0 0 auto; object-fit:contain; filter:drop-shadow(0 2px 4px rgba(0,0,0,.45)); }
+.tile-caption > .broadcaster-badge { width:15px; height:15px; }
 .participant-row small { margin-top:2px; color:#737d89; font-size:10px; }
 .participant-live { width:7px; height:7px; border-radius:50%; background:#3a424d; }
 .participant-live.active { background:#e95050; box-shadow:0 0 10px rgba(233,80,80,.7); }
@@ -140,8 +140,12 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .local-tile .video-empty { padding:24px 20px 110px; text-align:center; }
 .video-empty { height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; color:#69727e; }
 .tile-caption { position:absolute; left:12px; bottom:12px; display:flex; align-items:center; gap:8px; padding:8px 11px; border-radius:10px; background:rgba(5,7,9,.82); backdrop-filter:blur(10px); font-size:12px; }
-.audio-toggle { height:27px; display:inline-flex; align-items:center; gap:6px; padding:0 9px; border:1px solid rgba(255,255,255,.13); border-radius:8px; background:#181c22; color:#e5e8ec; font:inherit; font-size:10px; font-weight:700; cursor:pointer; }
-.audio-toggle:hover { border-color:rgba(242,201,76,.55); color:#f2c94c; }
+.audio-control { height:29px; display:inline-flex; align-items:center; gap:6px; padding:0 7px 0 3px; border:1px solid rgba(255,255,255,.13); border-radius:8px; background:#181c22; color:#e5e8ec; }
+.audio-control:focus-within { border-color:rgba(242,201,76,.55); }
+.audio-toggle { width:25px; height:25px; display:inline-grid; place-items:center; flex:0 0 auto; padding:0; border:0; border-radius:6px; background:transparent; color:inherit; cursor:pointer; }
+.audio-toggle:hover { color:#f2c94c; }
+.audio-volume { width:72px; height:18px; margin:0; accent-color:#f2c94c; cursor:pointer; }
+.audio-level { min-width:28px; color:#aeb5bf; font-size:9px; font-weight:800; text-align:right; }
 .watch-toggle { height:27px; padding:0 10px; border:1px solid rgba(242,201,76,.45); border-radius:8px; background:rgba(242,201,76,.1); color:#f2c94c; font:inherit; font-size:10px; font-weight:800; cursor:pointer; }
 .watch-toggle.active { border-color:rgba(239,103,103,.45); background:rgba(239,103,103,.1); color:#ef8888; }
 .view-toggle { width:29px; height:27px; display:inline-grid; place-items:center; flex:0 0 auto; padding:0; border:1px solid rgba(255,255,255,.13); border-radius:8px; background:#181c22; color:#dce1e7; cursor:pointer; }
@@ -391,7 +395,10 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .room-shell .tile-caption::-webkit-scrollbar { display:none; }
   .room-shell .tile-caption strong { flex:0 0 auto; max-width:120px; }
   .room-shell .tile-caption > span:not(.live-dot) { flex:0 0 auto; }
-  .room-shell .watch-toggle, .room-shell .view-toggle, .room-shell .audio-toggle { min-height:40px; height:40px; flex:0 0 auto; }
+  .room-shell .watch-toggle, .room-shell .view-toggle { min-height:40px; height:40px; flex:0 0 auto; }
+  .room-shell .audio-control { min-height:40px; height:40px; flex:0 0 auto; }
+  .room-shell .audio-toggle { width:34px; height:36px; }
+  .room-shell .audio-volume { width:76px; }
   .room-shell .view-toggle { width:40px; }
   .room-shell .stream-stats { top:7px; right:7px; max-width:calc(100% - 14px); }
   .room-shell .camera-panel { flex:0 0 auto; max-height:none; overflow:visible; border-radius:14px; }
@@ -414,7 +421,6 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .room-shell .camera-grid, .room-shell .camera-spotlight { grid-template-columns:minmax(0,1fr); }
   .room-shell .camera-spotlight > .camera-tile:first-child { grid-column:auto; }
   .room-shell .tile-caption strong { max-width:90px; }
-  .room-shell .audio-toggle span { display:none; }
 }
 
 @media (max-width:390px) {

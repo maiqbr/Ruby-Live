@@ -96,12 +96,14 @@ function VideoTile({ peer, stream, watching, focused, stats, onToggle, onFocus }
   const videoRef = useRef<HTMLVideoElement>(null);
   const tileRef = useRef<HTMLElement>(null);
   const [muted, setMuted] = useState(true);
+  const [volume, setVolume] = useState(100);
   const [videoReady, setVideoReady] = useState(false);
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
     video.srcObject = stream || null;
     setVideoReady(false);
+    video.volume = volume / 100;
     video.muted = true;
     setMuted(true);
     if (stream) void video.play().then(() => { if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) setVideoReady(true); }).catch(() => undefined);
@@ -110,10 +112,29 @@ function VideoTile({ peer, stream, watching, focused, stats, onToggle, onFocus }
   const toggleAudio = () => {
     const video = videoRef.current;
     if (!video) return;
+    if (video.muted && volume === 0) {
+      video.volume = 1;
+      setVolume(100);
+    }
     const nextMuted = !video.muted;
     video.muted = nextMuted;
     setMuted(nextMuted);
     void video.play().catch(() => {
+      video.muted = true;
+      setMuted(true);
+    });
+  };
+
+  const changeVolume = (value: number) => {
+    const video = videoRef.current;
+    if (!video) return;
+    const nextVolume = Math.max(0, Math.min(100, value));
+    const nextMuted = nextVolume === 0;
+    video.volume = nextVolume / 100;
+    video.muted = nextMuted;
+    setVolume(nextVolume);
+    setMuted(nextMuted);
+    if (!nextMuted) void video.play().catch(() => {
       video.muted = true;
       setMuted(true);
     });
@@ -146,12 +167,13 @@ function VideoTile({ peer, stream, watching, focused, stats, onToggle, onFocus }
         </button>
         {watching && <button className="view-toggle" type="button" onClick={onFocus} title={focused ? 'Voltar para a grade' : 'Destacar transmissão'}>{focused ? <Minimize2 size={15} /> : <Maximize2 size={15} />}</button>}
         {stream && <button className="view-toggle" type="button" onClick={() => void enterFullscreen()} title="Tela cheia" aria-label="Tela cheia"><Maximize size={15} /></button>}
-        {stream && (
-          <button className="audio-toggle" type="button" onClick={toggleAudio} title={muted ? 'Ativar áudio' : 'Silenciar'}>
+        {stream && <div className="audio-control" title={muted ? `Áudio silenciado · volume ${volume}%` : `Volume ${volume}%`}>
+          <button className="audio-toggle" type="button" onClick={toggleAudio} title={muted ? 'Ativar áudio' : 'Silenciar'} aria-label={muted ? 'Ativar áudio' : 'Silenciar'}>
             {muted ? <VolumeX size={15} /> : <Volume2 size={15} />}
-            <span>{muted ? 'Ativar áudio' : 'Áudio ligado'}</span>
           </button>
-        )}
+          <input className="audio-volume" type="range" min="0" max="100" step="1" value={volume} onChange={event => changeVolume(Number(event.target.value))} aria-label={`Volume da transmissão de ${peer.name}`} />
+          <span className="audio-level">{muted ? 'Mudo' : `${volume}%`}</span>
+        </div>}
       </div>
     </article>
   );
