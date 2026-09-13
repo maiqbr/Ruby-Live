@@ -59,6 +59,7 @@ type PeerState = {
 };
 
 type StreamQuality = '480' | '720' | '1080';
+type ScreenAudioMode = 'window' | 'system' | 'none';
 type ScreenLayout = 'auto' | 'grid' | 'theater' | 'row' | 'list';
 type PlaybackStats = { width?: number; height?: number; fps?: number; bitrate?: number; limited: boolean };
 const QUALITY_PRESETS: Record<StreamQuality, { width: number; height: number; label: string }> = {
@@ -225,6 +226,7 @@ export default function App() {
   const [serviceOnline, setServiceOnline] = useState<boolean | null>(null);
   const [streamQuality, setStreamQuality] = useState<StreamQuality>('720');
   const [streamFps, setStreamFps] = useState<15 | 30 | 60>(30);
+  const [screenAudioMode, setScreenAudioMode] = useState<ScreenAudioMode>('window');
   const [notice, setNotice] = useState<string | null>(null);
   const [socketEpoch, setSocketEpoch] = useState(0);
   const [duplicateSession, setDuplicateSession] = useState(false);
@@ -801,8 +803,9 @@ export default function App() {
       const preset = QUALITY_PRESETS[streamQuality];
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: { frameRate: { ideal: streamFps, max: streamFps }, width: { ideal: preset.width }, height: { ideal: preset.height } },
-        audio: true,
-        systemAudio: 'include',
+        audio: screenAudioMode !== 'none',
+        systemAudio: screenAudioMode === 'none' ? 'exclude' : 'include',
+        windowAudio: screenAudioMode === 'window' ? 'window' : screenAudioMode === 'system' ? 'system' : 'exclude',
       } as DisplayMediaStreamOptions);
       for (const track of stream.getVideoTracks()) prepareScreenTrack(track);
       if (roomRef.current !== room || socketRef.current !== socket || socket.readyState !== WebSocket.OPEN || localStreamRef.current) {
@@ -1005,7 +1008,9 @@ export default function App() {
                 <div className="media-settings-grid">
           <label><span>Qualidade</span><select value={streamQuality} onChange={event => setStreamQuality(event.target.value as StreamQuality)}>{Object.entries(QUALITY_PRESETS).map(([value, preset]) => <option value={value} key={value}>{preset.label}</option>)}</select></label>
           <label><span>FPS</span><select value={streamFps} onChange={event => setStreamFps(Number(event.target.value) as 15 | 30 | 60)}><option value={15}>15</option><option value={30}>30</option><option value={60}>60</option></select></label>
+          <label className="audio-mode-field"><span>Áudio compartilhado</span><select value={screenAudioMode} disabled={sharing} onChange={event => setScreenAudioMode(event.target.value as ScreenAudioMode)}><option value="window">Preferir apenas a janela</option><option value="system">Sistema inteiro</option><option value="none">Sem áudio</option></select></label>
                 </div>
+                <p className="screen-audio-hint">O modo de janela tenta isolar o aplicativo. Se o navegador não oferecer suporte, poderá usar o áudio geral selecionado na tela de compartilhamento. A opção é aplicada ao iniciar a transmissão.</p>
               </section>
               <section className="media-settings-section" aria-label="Configurações da webcam">
                 <h3><Video size={15} /> Câmera</h3>

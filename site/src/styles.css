@@ -297,11 +297,13 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .media-settings-section { display:flex; flex-direction:column; gap:10px; padding-top:12px; margin-top:4px; border-top:1px solid #ffffff10; }
 .media-settings-section h3 { display:flex; align-items:center; gap:7px; margin:0; font-size:12px; font-weight:600; }
 .media-settings-grid { display:grid; grid-template-columns:minmax(0,1fr) 84px; gap:10px; }
+.media-settings-grid .audio-mode-field { grid-column:1/-1; }
 .media-settings-section label { display:flex; flex-direction:column; gap:5px; min-width:0; color:#909baa; font-size:11px; }
 .media-settings-section select { width:100%; min-width:0; height:34px; padding:0 8px; border:1px solid #ffffff20; border-radius:8px; background:#0c0f14; color:#e5e9ef; font-size:12px; }
 .media-settings-section select:focus-visible { outline:2px solid #f2c94c; outline-offset:2px; }
 .media-settings-section select:disabled { opacity:.5; }
 .media-settings-section .camera-settings-hint { max-width:none; }
+.screen-audio-hint { margin:0; color:#818c9a; font-size:10px; line-height:1.45; }
 @media (max-width:700px) {
   .media-dock .identity { display:none; }
   .room-content { padding-bottom:calc(86px + env(safe-area-inset-bottom)); }
