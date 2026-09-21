@@ -2,6 +2,9 @@
 
 Tela e webcam para pessoas que estão na mesma call do Discord. O usuário entra com o Discord, o bot identifica a call e o site reúne seus participantes. Cada pessoa escolhe quais transmissões assistir.
 
+> [!IMPORTANT]
+> Este repositório distribui código-fonte e não oferece uma instância pública para terceiros. Instalações independentes não são monitoradas nem controladas pelos mantenedores. Antes de implantar ou usar, leia o [aviso de responsabilidade](DISCLAIMER.md) e a política de [uso responsável e proteção de pessoas](RESPONSIBLE_USE.md).
+
 O frontend e a sinalização rodam em um Cloudflare Worker com Durable Objects SQLite. A mídia passa diretamente entre navegadores por WebRTC: não passa pela hospedagem do bot nem por um servidor de vídeo deste projeto.
 
 ## Estrutura
@@ -137,6 +140,20 @@ O bot observa os eventos de voz localmente, mas envia snapshots apenas dos usuá
 
 As telas oferecem layouts automático, grade, cinema, faixa horizontal e lista vertical, além de destaque individual e tela cheia. As câmeras oferecem automático, faixa, grade e destaque. Resolução, FPS e bitrate recebidos são calculados por `RTCPeerConnection.getStats()` e exibidos somente no navegador; essas métricas não são enviadas ao Worker.
 
+### Segurança das transmissões
+
+O site autentica a conta Discord, confirma a presença na call e aplica as regras de canais e cargos definidas pelo operador. Esses controles limitam o acesso, mas não comprovam idade, não analisam o conteúdo transmitido e não eliminam riscos de abuso, gravação ou redistribuição por participantes autorizados.
+
+O Ruby Live não é uma funcionalidade oficial do Discord e não deve ser apresentado ou utilizado como meio de contornar determinações de autoridades, restrições legais, políticas de plataformas ou medidas de proteção. Cada operador deve avaliar a legislação aplicável e implementar salvaguardas efetivas antes de disponibilizar transmissões.
+
+Leia a política de [uso responsável e proteção de pessoas](RESPONSIBLE_USE.md). Se a instalação não puder oferecer controles adequados ao público e aos riscos envolvidos, a funcionalidade de transmissão não deve ser disponibilizada.
+
+### Responsabilidade e uso por terceiros
+
+Cada implantação deste código é independente e fica sob responsabilidade de quem a opera. Os mantenedores não hospedam uma aplicação pública compartilhada, não monitoram instalações de terceiros e não conseguem moderar usuários, transmissões ou dados em infraestrutura que não controlam.
+
+O projeto se destina a usos legítimos e consentidos por comunidades, mas sua disponibilidade pública não impede cópias, modificações ou usos indevidos por terceiros. Operadores e usuários devem cumprir a legislação, obter os consentimentos necessários e responder pela segurança, privacidade, moderação e uso de sua própria instalação. Consulte o [aviso de responsabilidade completo](DISCLAIMER.md).
+
 O compartilhamento de tela usa o content hint `detail` e solicita ao navegador que preserve resolução quando faltar banda. Essas opções são preferências WebRTC: cada navegador ainda pode adaptar a mídia conforme rede e capacidade do dispositivo.
 
 A página pública mostra apenas `Online` ou `Manutenção`. Ela verifica o heartbeat ao abrir e depois a cada cinco minutos.
@@ -180,4 +197,4 @@ Várias transmissões simultâneas exigem CPU e banda. Cada assinante adicional 
 
 ## Licença
 
-O código é distribuído sob a [licença MIT](LICENSE). Os SVGs genéricos de `site/public/` são disponibilizados separadamente sob CC0, conforme [VISUAL_ASSETS.md](VISUAL_ASSETS.md).
+O código é distribuído sob a [licença MIT](LICENSE), sem garantias e sujeito às limitações de responsabilidade nela previstas. Leia também o [aviso de responsabilidade](DISCLAIMER.md) e a política de [uso responsável e proteção de pessoas](RESPONSIBLE_USE.md). Os SVGs genéricos de `site/public/` são disponibilizados separadamente sob CC0, conforme [VISUAL_ASSETS.md](VISUAL_ASSETS.md).
