@@ -18,7 +18,7 @@ Conforme aplicável, isso pode exigir, entre outras providências:
 - bloqueio efetivo de funcionalidades incompatíveis com a idade do usuário;
 - segurança e privacidade desde a concepção e por padrão;
 - avaliação e gerenciamento contínuo de riscos;
-- canais visíveis e acessíveis de denúncia e atendimento;
+- canais visíveis e acessíveis de denúncia e atendimento, preferencialmente ligados diretamente na interface da transmissão;
 - capacidade de interromper sessões, restringir contas e preservar evidências de forma segura;
 - moderação humana e protocolos para situações urgentes;
 - comunicação a autoridades e remoção de material quando legalmente exigidas;

@@ -172,7 +172,7 @@ npm run dev
 
 Para variáveis locais, copie `site/.dev.vars.example` para `site/.dev.vars` e preencha com credenciais de desenvolvimento. O preview serve para desenvolver a interface. Para validar OAuth, cookies seguros, captura e dois navegadores, use uma instalação de testes HTTPS com redirect próprio; não remova `Secure` dos cookies para contornar problemas de ambiente. Os testes automatizados simulam Discord/Cloudflare e não substituem um teste real entre dois participantes.
 
-Personalize o nome da comunidade em `site/src/config.ts`, textos em `site/src/App.tsx`, estilo em `site/src/styles.css` e artes em `site/public`. Os SVGs incluídos no template estão descritos em [VISUAL_ASSETS.md](VISUAL_ASSETS.md).
+Personalize o nome da comunidade e o canal de denúncia em `site/src/config.ts`, textos em `site/src/App.tsx`, estilo em `site/src/styles.css` e artes em `site/public`. Defina `REPORT_URL` com uma URL HTTPS para o canal ou formulário de denúncia do operador; enquanto o valor estiver vazio, o botão não será exibido. O canal deve ser acessível aos usuários autorizados e acompanhado pela equipe responsável. Os SVGs incluídos no template estão descritos em [VISUAL_ASSETS.md](VISUAL_ASSETS.md).
 
 ## Custos e limites
 

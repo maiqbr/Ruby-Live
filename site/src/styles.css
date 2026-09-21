@@ -92,6 +92,12 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .room-shell { display:flex; flex-direction:column; height:100vh; height:100dvh; min-height:0; overflow:hidden; background:#07090c; }
 .roombar { height:68px; padding-inline:28px; }
 .room-status { display:flex; align-items:center; gap:9px; color:#aeb5bf; font-size:13px; }
+.room-actions { display:flex; align-items:center; gap:6px; }
+.room-actions form { margin:0; }
+.report-link { min-height:32px; display:inline-flex; align-items:center; gap:7px; padding:0 11px; border:1px solid rgba(239,83,80,.32); border-radius:8px; background:rgba(239,83,80,.08); color:#ffaaa8; font-size:12px; font-weight:750; text-decoration:none; transition:.16s ease; }
+.report-link:hover { border-color:rgba(239,83,80,.62); background:rgba(239,83,80,.15); color:#ffd0cf; }
+.report-link:focus-visible { outline:2px solid rgba(239,83,80,.7); outline-offset:2px; }
+.report-link svg { width:15px; height:15px; }
 .room-content { flex:1; min-height:0; display:grid; grid-template-columns:260px minmax(0,1fr); gap:12px; padding:12px 12px 108px; }
 .participants-panel { min-height:0; overflow:hidden; border:1px solid var(--border); border-radius:18px; background:#0d1015; }
 .participants-panel header { height:54px; display:flex; align-items:center; justify-content:space-between; padding:0 14px; border-bottom:1px solid var(--border); color:#d8dde4; font-size:12px; font-weight:700; }

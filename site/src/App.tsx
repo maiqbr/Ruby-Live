@@ -3,6 +3,7 @@ import {
   BadgeCheck,
   CircleStop,
   LayoutGrid,
+  Flag,
   LogOut,
   Maximize,
   Maximize2,
@@ -941,7 +942,10 @@ export default function App() {
       <nav className="roombar">
         <div className="brand"><span className="brand-mark"><img src="/brand-mark.svg" alt="" /></span><span>Ruby <b>Live</b></span></div>
         <div className="room-status"><span className="status-dot" /> {me.voice.channelName || 'Call do Discord'}</div>
-        <form method="post" action="/api/logout"><Button type="submit" variant="ghost" size="sm"><LogOut /> Sair</Button></form>
+        <div className="room-actions">
+          {REPORT_URL && <a className="report-link" href={REPORT_URL} target="_blank" rel="noopener noreferrer"><Flag /> Denunciar</a>}
+          <form method="post" action="/api/logout"><Button type="submit" variant="ghost" size="sm"><LogOut /> Sair</Button></form>
+        </div>
       </nav>
 
       <div className="room-content">
@@ -1028,4 +1032,4 @@ export default function App() {
     </main>
   );
 }
-import { COMMUNITY_NAME } from './config';
+import { COMMUNITY_NAME, REPORT_URL } from './config';
