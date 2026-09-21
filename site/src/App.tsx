@@ -870,7 +870,7 @@ export default function App() {
             <p>Entre com o Discord. A gente encontra sua call automaticamente e conecta sua transmissão direto aos tripulantes.</p>
             <a className="discord-button" href="/api/auth/discord"><span className="discord-glyph">Discord</span> Entrar e encontrar minha call</a>
             <div className="trust-row">
-              <span><ShieldCheck size={17} /> Login oficial do Discord</span>
+              <span><ShieldCheck size={17} /> Login facilitado</span>
               <span><BadgeCheck size={17} /> Sem gravação</span>
               <span><WifiOff size={17} /> Mídia P2P criptografada</span>
             </div>
