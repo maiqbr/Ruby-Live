@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   BadgeCheck,
   CircleStop,
+  Eye,
   LayoutGrid,
   Flag,
   LogOut,
@@ -24,6 +25,7 @@ import {
 import { cameraConstraints, exactCameraVideoConstraints, prepareScreenTrack, syncOutgoingTracks, type MediaKind, type CameraQuality, type CameraFps } from './media';
 import { CameraTile } from './CameraTile';
 import { openMediaFullscreen } from './fullscreen';
+import { ViewerSummary } from './ViewerSummary';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverTrigger, PopoverContent, PopoverTitle, PopoverDescription } from '@/components/ui/popover';
@@ -181,7 +183,7 @@ function VideoTile({ peer, stream, watching, focused, stats, onToggle, onFocus }
   );
 }
 
-function LocalVideoTile({ stream, focused, stats, onFocus, onStop }: { stream: MediaStream; focused: boolean; stats?: PlaybackStats; onFocus: () => void; onStop: () => void }) {
+function LocalVideoTile({ stream, focused, stats, viewers, onFocus, onStop }: { stream: MediaStream; focused: boolean; stats?: PlaybackStats; viewers: User[]; onFocus: () => void; onStop: () => void }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const tileRef = useRef<HTMLElement>(null);
   const [previewVisible, setPreviewVisible] = useState(true);
@@ -205,6 +207,7 @@ function LocalVideoTile({ stream, focused, stats, onFocus, onStop }: { stream: M
       {previewVisible && <StatsBadge stats={stats} />}
       <div className="tile-caption local-caption">
         <span className="live-dot active" /><strong>Sua transmissão</strong><span>ao vivo</span>
+        <ViewerSummary viewers={viewers} label="Assistindo sua tela" />
         <button className="watch-toggle" type="button" onClick={() => setPreviewVisible(current => !current)} title="Altera somente a sua prévia, sem interromper a transmissão">{previewVisible ? 'Ocultar prévia' : 'Mostrar prévia'}</button>
         <button className="view-toggle" type="button" onClick={onFocus} title={focused ? 'Voltar para a grade' : 'Destacar transmissão'} aria-label={focused ? 'Voltar para a grade' : 'Destacar sua transmissão'}>{focused ? <Minimize2 size={15} /> : <Maximize2 size={15} />}</button>
         {previewVisible && <button className="view-toggle" type="button" onClick={() => void enterFullscreen()} title="Tela cheia" aria-label="Sua transmissão em tela cheia"><Maximize size={15} /></button>}
@@ -234,6 +237,8 @@ export default function App() {
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [cameraStreams, setCameraStreams] = useState<Record<string, MediaStream>>({});
   const [watchingCameras, setWatchingCameras] = useState<Record<string, boolean>>({});
+  const [screenViewers, setScreenViewers] = useState<Record<string, boolean>>({});
+  const [cameraViewers, setCameraViewers] = useState<Record<string, boolean>>({});
   const [cameraDevices, setCameraDevices] = useState<MediaDeviceInfo[]>([]);
   const [cameraDeviceId, setCameraDeviceId] = useState('');
   const [cameraQuality, setCameraQuality] = useState<CameraQuality>(360);
@@ -274,6 +279,8 @@ export default function App() {
     }
     subscribersRef.current.delete(peerId);
     cameraSubscribersRef.current.delete(peerId);
+    setScreenViewers(current => { const next = { ...current }; delete next[peerId]; return next; });
+    setCameraViewers(current => { const next = { ...current }; delete next[peerId]; return next; });
     setWatchingCameras(current => ({ ...current, [peerId]: false }));
     setFocusedCameraId(current => current === peerId ? null : current);
     setCameraStreams(current => { const next = { ...current }; delete next[peerId]; return next; });
@@ -406,6 +413,7 @@ export default function App() {
     for (const track of stream?.getTracks() || []) track.stop();
     for (const { pc } of cameraConnections.current.values()) syncOutgoingTracks(pc, null, false);
     cameraSubscribersRef.current.clear();
+    setCameraViewers({});
     setCameraStream(null);
     setCameraBusy(false);
     setFocusedCameraId(current => current === 'self' ? null : current);
@@ -421,6 +429,8 @@ export default function App() {
     setSharing(false);
     setWatching({});
     setWatchingCameras({});
+    setScreenViewers({});
+    setCameraViewers({});
     setFocusedPeerId(null);
     setFocusedCameraId(null);
     setStreams({});
@@ -438,6 +448,8 @@ export default function App() {
     }
     subscribersRef.current.clear();
     cameraSubscribersRef.current.clear();
+    setScreenViewers({});
+    setCameraViewers({});
     setStreams({});
     setCameraStreams({});
   }, []);
@@ -656,6 +668,13 @@ export default function App() {
           setCameraStreams(current => { const next = { ...current }; delete next[message.userId]; return next; });
         }
       } else if (message.type === 'watch_state') {
+        const setViewers = message.media === 'camera' ? setCameraViewers : setScreenViewers;
+        setViewers(current => {
+          const next = { ...current };
+          if (message.watching) next[message.from] = true;
+          else delete next[message.from];
+          return next;
+        });
         void updateSubscriber(message.from, message.watching, message.media);
       } else if (message.type === 'signal') {
         void handleSignal(message.from, message.data, message.media);
@@ -842,6 +861,7 @@ export default function App() {
     }
     localStreamRef.current = null;
     subscribersRef.current.clear();
+    setScreenViewers({});
     setLocalStream(null);
     setSharing(false);
     setFocusedPeerId(current => current === 'self' ? null : current);
@@ -935,7 +955,9 @@ export default function App() {
     ...(cameraStream && me.user ? [{ user: { ...me.user, broadcaster: me.voice.broadcaster }, key: 'self', stream: cameraStream, watching: true, local: true }] : []),
     ...cameraPeers.map(peer => ({ user: peer, key: peer.id, stream: watchingCameras[peer.id] ? cameraStreams[peer.id] : undefined, watching: Boolean(watchingCameras[peer.id]), local: false })),
   ];
-  const cameraTile = (entry: typeof cameraEntries[number]) => <CameraTile key={entry.key} user={entry.user} stream={entry.stream} stats={entry.local ? undefined : cameraStats[entry.key]} actualLabel={entry.local ? cameraActual : undefined} watching={entry.watching} local={entry.local} focused={focusedCameraId === entry.key} onToggle={entry.local ? stopCamera : () => toggleWatchingCamera(entry.key)} onFocus={() => setFocusedCameraId(current => current === entry.key ? null : entry.key)} />;
+  const screenViewerList = peerList.filter(peer => screenViewers[peer.id]);
+  const cameraViewerList = peerList.filter(peer => cameraViewers[peer.id]);
+  const cameraTile = (entry: typeof cameraEntries[number]) => <CameraTile key={entry.key} user={entry.user} stream={entry.stream} stats={entry.local ? undefined : cameraStats[entry.key]} actualLabel={entry.local ? cameraActual : undefined} watching={entry.watching} local={entry.local} focused={focusedCameraId === entry.key} viewers={entry.local ? cameraViewerList : undefined} onToggle={entry.local ? stopCamera : () => toggleWatchingCamera(entry.key)} onFocus={() => setFocusedCameraId(current => current === entry.key ? null : entry.key)} />;
   const focusedCamera = cameraEntries.find(entry => entry.key === focusedCameraId && entry.watching);
   return (
     <main className="room-shell">
@@ -955,13 +977,13 @@ export default function App() {
             <div className="participant-row">
               <span className="avatar">{me.user && avatarUrl(me.user) ? <img src={avatarUrl(me.user)!} alt="" /> : me.user?.name.slice(0, 1)}</span>
               <span><strong>{me.user?.name}<BroadcasterBadge visible={me.voice.broadcaster} /></strong><small>{[sharing && 'Tela ao vivo', cameraStream && 'Câmera ligada'].filter(Boolean).join(' + ') || 'Na sala'}</small></span>
-              <span className={sharing || cameraStream ? 'participant-live active' : 'participant-live'} />
+              <span className="participant-indicators"><span className={sharing || cameraStream ? 'participant-live active' : 'participant-live'} /></span>
             </div>
             {peerList.map(peer => (
               <button type="button" className={`participant-row${peer.sharing || peer.camera ? ' clickable' : ''}${focusedPeerId === peer.id || focusedCameraId === peer.id ? ' selected' : ''}`} key={peer.id} disabled={!peer.sharing && !peer.camera} onClick={() => { if (peer.sharing) focusFromSidebar(peer.id); else { if (!watchingCameras[peer.id]) toggleWatchingCamera(peer.id); setFocusedCameraId(peer.id); } }} title={`Ver mídia de ${peer.name}`}>
                 <span className="avatar">{avatarUrl(peer) ? <img src={avatarUrl(peer)!} alt="" /> : peer.name.slice(0, 1).toUpperCase()}</span>
                 <span><strong>{peer.name}<BroadcasterBadge visible={peer.broadcaster} /></strong><small>{[peer.sharing && 'Tela ao vivo', peer.camera && 'Webcam'].filter(Boolean).join(' + ') || 'Na sala'}</small></span>
-                <span className={peer.sharing || peer.camera ? 'participant-live active' : 'participant-live'} />
+                <span className="participant-indicators">{screenViewers[peer.id] && <span className="viewer-flag screen" title="Assistindo sua tela"><Eye size={12} /><b>T</b></span>}{cameraViewers[peer.id] && <span className="viewer-flag camera" title="Assistindo sua câmera"><Eye size={12} /><b>C</b></span>}<span className={peer.sharing || peer.camera ? 'participant-live active' : 'participant-live'} /></span>
               </button>
             ))}
           </div>
@@ -970,7 +992,7 @@ export default function App() {
         <div className="room-stage">
           {(hasBroadcast || !cameraCount) && <div className="stream-toolbar"><span>Transmissões <b>{broadcastingPeers.length + (sharing ? 1 : 0)}</b></span><div className="stream-toolbar-actions">{!screensMinimized && <label className="layout-picker"><span>Layout</span><select value={screenLayout} onChange={event => { setScreenLayout(event.target.value as ScreenLayout); setFocusedPeerId(null); }}><option value="auto">Automático</option><option value="grid">Grade</option><option value="theater">Cinema</option><option value="row">Faixa horizontal</option><option value="list">Lista vertical</option></select></label>}{!screensMinimized && (selectedBroadcasts.length > 1 || focusedPeerId) && <button type="button" onClick={() => setFocusedPeerId(null)} disabled={!focusedPeerId}><LayoutGrid size={15} /> Mostrar todas</button>}<button type="button" aria-expanded={!screensMinimized} aria-controls="call-screens-content" title={screensMinimized ? 'Mostrar transmissões' : 'Minimizar área sem interromper as transmissões'} onClick={() => setScreensMinimized(current => !current)}>{screensMinimized ? <ChevronDown size={15} /> : <ChevronUp size={15} />}{screensMinimized ? 'Mostrar' : 'Minimizar'}</button></div></div>}
           {(hasBroadcast || !cameraCount) && <section id="call-screens-content" hidden={screensMinimized} className={`video-grid layout-${effectiveScreenLayout}${focusedPeerId ? ' focus-mode' : ''}`}>
-            {sharing && localStream && <LocalVideoTile stream={localStream} stats={localScreenStats} focused={focusedPeerId === 'self'} onFocus={() => setFocusedPeerId(current => current === 'self' ? null : 'self')} onStop={stopSharing} />}
+            {sharing && localStream && <LocalVideoTile stream={localStream} stats={localScreenStats} viewers={screenViewerList} focused={focusedPeerId === 'self'} onFocus={() => setFocusedPeerId(current => current === 'self' ? null : 'self')} onStop={stopSharing} />}
             {broadcastingPeers.map(peer => <VideoTile key={peer.id} peer={peer} stream={watching[peer.id] ? streams[peer.id] : undefined} watching={Boolean(watching[peer.id])} stats={screenStats[peer.id]} focused={focusedPeerId === peer.id} onFocus={() => setFocusedPeerId(current => current === peer.id ? null : peer.id)} onToggle={() => toggleWatching(peer.id)} />)}
             {!hasBroadcast && <div className="no-broadcast"><img src="/screen.svg" alt="" /><h2>Ninguém está transmitindo ainda</h2><p>Quando alguém compartilhar a tela, a transmissão aparecerá aqui automaticamente.</p></div>}
           </section>}

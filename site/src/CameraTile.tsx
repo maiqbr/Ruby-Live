@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Maximize, Maximize2, Minimize2, Video } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { openMediaFullscreen } from './fullscreen';
+import { ViewerSummary } from './ViewerSummary';
 
 type Props = {
   user: { id: string; name: string; avatar: string | null; broadcaster?: boolean };
@@ -11,11 +12,12 @@ type Props = {
   watching: boolean;
   local?: boolean;
   focused: boolean;
+  viewers?: Array<{ id: string; name: string; avatar: string | null }>;
   onToggle: () => void;
   onFocus: () => void;
 };
 
-export function CameraTile({ user, stream, stats, actualLabel, watching, local, focused, onToggle, onFocus }: Props) {
+export function CameraTile({ user, stream, stats, actualLabel, watching, local, focused, viewers, onToggle, onFocus }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const tileRef = useRef<HTMLElement>(null);
   const [playBlocked, setPlayBlocked] = useState(false);
@@ -47,6 +49,7 @@ export function CameraTile({ user, stream, stats, actualLabel, watching, local, 
       </button>
       {playBlocked && <Button size="sm" className="camera-play" onClick={() => void videoRef.current?.play().then(() => setPlayBlocked(false)).catch(() => undefined)}>Reproduzir câmera</Button>}
       <div className="camera-caption"><span className="camera-person"><strong>{local ? 'Você' : user.name}{user.broadcaster && <img className="broadcaster-badge" src="/verificado.png" alt="" title="Pode transmitir" />}</strong><small>{local ? `${actualLabel || 'Verificando captura…'} · sem microfone` : watching ? 'Recebendo câmera' : 'Disponível · não recebendo'}</small></span>
+        {local && <ViewerSummary viewers={viewers || []} label="Assistindo sua câmera" />}
         <Button size="xs" variant={watching ? 'secondary' : 'default'} onClick={onToggle}>{local ? 'Desligar' : watching ? 'Parar' : 'Ver'}</Button>
         {watching && <Button size="icon-xs" variant="ghost" onClick={onFocus} aria-label={focused ? 'Reduzir câmera' : 'Destacar câmera'} title={focused ? 'Reduzir câmera' : 'Destacar câmera'}>{focused ? <Minimize2 /> : <Maximize2 />}</Button>}
         {stream && watching && <Button size="icon-xs" variant="ghost" onClick={() => void enterFullscreen()} aria-label="Câmera em tela cheia" title="Tela cheia"><Maximize /></Button>}
