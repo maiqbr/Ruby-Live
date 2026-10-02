@@ -466,13 +466,9 @@ export class VoiceHub extends DurableObject<Env> {
           this.inactiveSince.delete(userId);
           continue;
         }
-        // An active browser missing from Discord's snapshot really left voice.
-        // A temporarily absent socket gets a short grace period so reconnects
-        // and Worker deployments do not tear down an otherwise valid room.
-        if (activeUsers.has(userId)) {
-          await this.removeUser(userId);
-          continue;
-        }
+        // Snapshots reconcile cache state and can be momentarily incomplete.
+        // Real exits arrive as voice_event and remain immediate; require a
+        // repeated omission before a snapshot alone tears down active media.
         const missingSince = this.inactiveSince.get(userId);
         if (!missingSince) {
           this.inactiveSince.set(userId, Date.now());

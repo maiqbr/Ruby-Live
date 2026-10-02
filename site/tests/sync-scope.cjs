@@ -65,6 +65,10 @@ async function main() {
   writes = 0;
   await hub.applySync(snapshot, 'event-2');
   assert.equal(writes, 1, 'unchanged snapshot only writes its event id');
+  const emptySnapshot = { ...snapshot, channels: [] };
+  await hub.applySync(emptySnapshot, 'event-2a');
+  assert.equal([...db.keys()].filter(key => key.startsWith('user:')).length, 2, 'one incomplete snapshot does not tear down active browser media');
+  for (const userId of ids.slice(0, 2)) hub.inactiveSince.delete(userId);
   writes = 0;
   for (let i = 0; i < 100; i++) await hub.applySync({ type: 'heartbeat' }, `hb-${i}`);
   assert.equal(writes, 0, 'heartbeats within 30 seconds do not write');

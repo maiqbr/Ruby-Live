@@ -600,7 +600,10 @@ export default function App() {
           roomRef.current = null;
           setMe(current => current ? { ...current, voice: null, waiting: message.waiting || null, syncHealthy: message.syncHealthy } : current);
         };
-        if (roomRef.current) waitingTimer = window.setTimeout(applyWaiting, 8_000);
+        // A queda do sincronizador não significa que o usuário saiu da call.
+        // Preserve captura e WebRTC por uma janela maior enquanto o bot se
+        // recupera; uma ausência confirmada com sync saudável continua rápida.
+        if (roomRef.current) waitingTimer = window.setTimeout(applyWaiting, message.syncHealthy ? 8_000 : 60_000);
         else applyWaiting();
       } else if (message.type === 'session') {
         window.clearTimeout(waitingTimer);
@@ -686,21 +689,26 @@ export default function App() {
       if (cancelled || socketRef.current !== socket) return;
       window.clearInterval(keepAliveTimer);
       socketRef.current = null;
-      resetPeerConnections();
-      setPeers({});
       if (event.code === 4009 || event.code === 4000) {
+        resetPeerConnections();
+        setPeers({});
         stopRoomMedia();
         roomRef.current = null;
         setDuplicateSession(true);
         return;
       }
       if (event.code === 4003) {
+        resetPeerConnections();
+        setPeers({});
         stopRoomMedia();
         roomRef.current = null;
         setMe({ authenticated: false });
         setNotice('Sua sessão expirou. Entre novamente com o Discord.');
         return;
       }
+      // O WebRTC continua funcionando sem o canal de sinalização. Não apague
+      // participantes, streams ou conexões por uma oscilação curta do socket;
+      // a sessão recebida na reconexão reconcilia o estado verdadeiro.
       if (event.code === 4002) setNotice('A sincronização com o Discord foi interrompida. Tentando reconectar…');
       const delay = Math.min(1_500 * 2 ** reconnectAttemptsRef.current, 30_000);
       reconnectAttemptsRef.current += 1;
